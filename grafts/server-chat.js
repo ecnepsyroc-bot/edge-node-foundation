@@ -1,0 +1,270 @@
+/**
+ * GRAFT: Server ↔ Chat
+ * 
+ * Connects server HTTP/WebSocket to chat management
+ */
+
+class ServerChatGraft {
+  constructor(serverManager, chatManager) {
+    this.server = serverManager;
+    this.chat = chatManager;
+  }
+
+  /**
+   * Handle HTTP API endpoints
+   */
+  handleHTTPRequest(req, res) {
+    // Login endpoint
+    if (req.url === '/api/login' && req.method === 'POST') {
+      this.server.parseBody(req, (err, data) => {
+        if (err || !data.username || data.username.trim().length === 0) {
+          this.server.sendJSON(res, 400, { error: 'Username required' });
+          return;
+        }
+
+        const user = this.chat.registerUser(data.username);
+        this.server.sendJSON(res, 200, { success: true, user: { username: data.username } });
+      });
+      return true;
+    }
+
+    // Get messages endpoint
+    if (req.url.startsWith('/api/messages') && req.method === 'GET') {
+      // Parse query parameters
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const jobId = url.searchParams.get('job_id');
+      const subcategory = url.searchParams.get('subcategory');
+      const chatId = url.searchParams.get('chat_id');
+
+      const rawMessages = this.chat.getMessages();
+
+      const filtered = rawMessages.filter((msg) => {
+        const messageJob = msg.job || msg.job_id || 'General';
+        if (jobId && messageJob !== jobId) {
+          return false;
+        }
+
+        const messageSubcategory = msg.subcategory || 'Seeking Solution';
+        if (subcategory && messageSubcategory !== subcategory) {
+          return false;
+        }
+
+        const messageChat = msg.individualChat || msg.individual_chat_id || null;
+        if (chatId && messageChat !== chatId) {
+          return false;
+        }
+
+        return true;
+      });
+
+      const messages = filtered.map((msg) => this.normalizeMessage(msg));
+      this.server.sendJSON(res, 200, { messages });
+      return true;
+    }
+
+    if (req.url.startsWith('/api/messages') && req.method === 'DELETE') {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const messageId = url.searchParams.get('message_id');
+      const username = (url.searchParams.get('username') || '').trim();
+      const jobId = (url.searchParams.get('job_id') || 'General').trim();
+      const subcategory = (url.searchParams.get('subcategory') || 'Seeking Solution').trim();
+      const chatId = url.searchParams.get('chat_id');
+
+      // Single message deletion by ID
+      if (messageId) {
+        const success = this.chat.deleteMessageById(messageId);
+        this.server.sendJSON(res, 200, { success });
+
+        if (success) {
+          this.server.broadcast({
+            type: 'message_deleted',
+            message_id: messageId,
+            timestamp: new Date().toISOString()
+          });
+        }
+        return true;
+      }
+
+      // Bulk deletion by user/context (excludes isProblem messages)
+      if (!username) {
+        this.server.sendJSON(res, 400, { error: 'Username required' });
+        return true;
+      }
+
+      const deleted = this.chat.deleteMessagesByUser(
+        username,
+        jobId,
+        subcategory,
+        chatId || null
+      );
+
+      this.server.sendJSON(res, 200, { success: true, deletedCount: deleted });
+
+      if (deleted > 0) {
+        this.broadcastDeletion(
+          username,
+          jobId,
+          subcategory,
+          chatId || null
+        );
+      }
+
+      return true;
+    }
+
+    // Get jobs endpoint
+    if (req.url === '/api/jobs' && req.method === 'GET') {
+      // This will be handled by jobs graft
+      return false;
+    }
+
+    return false;
+  }
+
+  /**
+   * Handle WebSocket messages
+   */
+  handleWebSocketMessage(data, ws, broadcast) {
+    switch (data.type) {
+      case 'auth': {
+        const username = (data.username || '').trim();
+        if (!username) {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              error: 'Username required'
+            })
+          );
+          return;
+        }
+
+        this.chat.registerUser(username);
+        ws.user = { username };
+        ws.send(
+          JSON.stringify({
+            type: 'auth_success',
+            username,
+            timestamp: new Date().toISOString()
+          })
+        );
+        break;
+      }
+
+      case 'message': {
+        if (!ws.user || !ws.user.username) {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              error: 'Not authenticated'
+            })
+          );
+          return;
+        }
+
+        const username = ws.user.username;
+        const jobId = data.job_id || data.job || 'General';
+        const subcategory = data.subcategory || 'Seeking Solution';
+        const individualChat =
+          data.individual_chat_id || data.individualChat || null;
+
+        const storedMessage = this.chat.addMessage({
+          id: Date.now().toString(),
+          user: username,
+          text: data.text || '',
+          job: jobId,
+          timestamp: new Date().toISOString(),
+          subcategory,
+          individualChat,
+          isProblem: data.isProblem
+        });
+
+        const normalized = this.normalizeMessage(storedMessage);
+
+        broadcast({
+          type: 'message',
+          ...normalized
+        });
+        break;
+      }
+
+      case 'delete_messages': {
+        const username =
+          data.user || data.username || (ws.user ? ws.user.username : '');
+        const jobId = data.job || data.job_id;
+        const subcategory = data.subcategory || 'Seeking Solution';
+        const individualChat =
+          data.individualChat || data.individual_chat_id || null;
+
+        const deleted = this.chat.deleteMessagesByUser(
+          username,
+          jobId,
+          subcategory,
+          individualChat
+        );
+
+        broadcast({
+          type: 'messages_deleted',
+          username,
+          job_id: jobId,
+          subcategory,
+          individual_chat_id: individualChat,
+          count: deleted
+        });
+        break;
+      }
+
+      case 'subcategory_created':
+        this.chat.addJobSubcategory(data.job, data.subcategory);
+        broadcast({
+          type: 'subcategory_created',
+          job_id: data.job,
+          subcategory: data.subcategory
+        });
+        break;
+
+      case 'individual_chat_created':
+        this.chat.addIndividualChat(data.job, data.subcategory, data.chatName);
+        broadcast({
+          type: 'individual_chat_created',
+          job_id: data.job,
+          subcategory: data.subcategory,
+          chatName: data.chatName
+        });
+        break;
+
+      case 'factory_order_deleted':
+        this.chat.deleteJobSubcategory(data.job, data.subcategory);
+        broadcast({
+          type: 'factory_order_deleted',
+          jobId: data.job,
+          subcategory: data.subcategory
+        });
+        break;
+    }
+  }
+
+  normalizeMessage(msg) {
+    return {
+      id: String(msg.id || Date.now()),
+      username: msg.username || msg.user || 'Unknown',
+      text: msg.text || '',
+      job_id: msg.job_id || msg.job || 'General',
+      subcategory: msg.subcategory || 'Seeking Solution',
+      individual_chat_id: msg.individual_chat_id || msg.individualChat || null,
+      timestamp: msg.timestamp || new Date().toISOString()
+    };
+  }
+
+  broadcastDeletion(username, jobId, subcategory, chatId) {
+    this.server.broadcast({
+      type: 'messages_deleted',
+      username,
+      job_id: jobId,
+      subcategory,
+      individual_chat_id: chatId,
+      timestamp: new Date().toISOString()
+    });
+  }
+}
+
+module.exports = ServerChatGraft;

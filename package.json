@@ -1,0 +1,16 @@
+{
+  "name": "shop-communication-tool",
+  "version": "1.0.0",
+  "description": "Simple shop communication tool with color-highlighted text",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.2",
+    "compromise": "^14.9.0"
+  },
+  "keywords": ["websocket", "chat", "communication"],
+  "author": "",
+  "license": "MIT"
+}

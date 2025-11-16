@@ -1,0 +1,792 @@
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const WebSocket = require('ws');
+const os = require('os');
+const crypto = require('crypto');
+
+const PORT = 3000;
+const DB_FILE = 'chat-data.json';
+
+// Job list
+const JOBS = [
+    'General',
+    '3410 Marpole Avenue',
+    'Archetype',
+    'Bellano',
+    'Blueberry',
+    'Cactus Club Boston',
+    'Cactus Club Houston',
+    'Cactus Club Miami',
+    'Canaccord 1133',
+    'Cirnac',
+    'Deloitte 2024',
+    'Dentons',
+    'Disney',
+    'ESDC',
+    'EVR',
+    'Harbourside- Lot D',
+    'Hue',
+    'Keith',
+    'King Taps Lonsdale',
+    'Kings Tap - Park Place',
+    'LaSalle College',
+    'Myriad',
+    'Netflix',
+    'Oakridge - Building 6 & 7',
+    'PWC-5th Floor',
+    'PWC-7th Floor',
+    'RBC GAM',
+    'Shape Properties',
+    'Smith and Farrow',
+    'Sunlife - Burnaby',
+    'Teck Res. 34th (Phase2)',
+    'Teck Res. 34th (Phase3)',
+    'WC Fishing Lodge',
+    'YVR 21N'
+];
+
+// Simple JSON database
+let db = {
+    users: {},
+    messages: [],
+    jobSubcategories: {}, // Track which jobs have Factory Order: { jobId: true/false }
+    individualChats: {}, // Track individual chats per job: { jobId: [{ id, name, created_at }] }
+    problems: {} // Track problems: { problemId: { id, job_id, subcategory, individual_chat_id, problem_text, solution_text, status, created_by, created_at, solved_by, solved_at } }
+};
+
+// Load database
+if (fs.existsSync(DB_FILE)) {
+    try {
+        const loadedData = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+        // Merge loaded data with default structure to ensure all properties exist
+        db = {
+            users: loadedData.users || {},
+            messages: loadedData.messages || [],
+            jobSubcategories: loadedData.jobSubcategories || {},
+            individualChats: loadedData.individualChats || {},
+            problems: loadedData.problems || {}
+        };
+        console.log('Database loaded successfully');
+    } catch (err) {
+        console.error('Failed to load database, using empty:', err.message);
+    }
+}
+
+// Save database
+function saveDB() {
+    try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+    } catch (err) {
+        console.error('Failed to save database:', err.message);
+    }
+}
+
+// Create HTTP server to serve static files and API
+const server = http.createServer((req, res) => {
+    // API endpoints
+    if (req.url === '/api/login' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const { username } = JSON.parse(body);
+                if (!username || username.trim().length === 0) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Username required' }));
+                    return;
+                }
+                
+                if (!db.users[username]) {
+                    db.users[username] = {
+                        id: Object.keys(db.users).length + 1,
+                        username,
+                        created_at: new Date().toISOString()
+                    };
+                    saveDB();
+                }
+                
+                const user = db.users[username];
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ user, success: true }));
+            } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Server error' }));
+            }
+        });
+        return;
+    }
+    
+    if (req.url === '/api/jobs' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ jobs: JOBS }));
+        return;
+    }
+    
+    if (req.url === '/api/jobs' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const { jobName } = JSON.parse(body);
+                if (!jobName || jobName.trim().length === 0) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Job name required' }));
+                    return;
+                }
+                
+                const trimmedName = jobName.trim();
+                
+                // Check if job already exists
+                if (JOBS.includes(trimmedName)) {
+                    res.writeHead(409, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Job already exists' }));
+                    return;
+                }
+                
+                // Add job after General (at index 1)
+                JOBS.splice(1, 0, trimmedName);
+                
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, jobName: trimmedName }));
+                
+                console.log(`New job created: ${trimmedName}`);
+            } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Server error' }));
+            }
+        });
+        return;
+    }
+    
+    if (req.url.match(/\/api\/jobs\/[^\/]+\/subcategories$/) && req.method === 'GET') {
+        try {
+            const urlParts = req.url.split('/');
+            const jobId = decodeURIComponent(urlParts[urlParts.length - 2]);
+            const hasFactoryOrder = db.jobSubcategories[jobId] || false;
+            
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ hasFactoryOrder }));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Server error' }));
+        }
+        return;
+    }
+    
+    if (req.url.match(/\/api\/jobs\/[^\/]+\/subcategories$/) && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const urlParts = req.url.split('/');
+                const jobId = decodeURIComponent(urlParts[urlParts.length - 2]);
+                const { subcategory } = JSON.parse(body);
+                
+                console.log(`Creating subcategory "${subcategory}" for job: ${jobId}`);
+                
+                if (subcategory !== 'Factory Order') {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Invalid subcategory' }));
+                    return;
+                }
+                
+                db.jobSubcategories[jobId] = true;
+                saveDB();
+                
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+                
+                console.log(`✓ Factory Order subcategory created for job: ${jobId}`);
+                
+                // Broadcast subcategory creation to all clients
+                clients.forEach((clientUser, client) => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify({
+                            type: 'subcategory_created',
+                            job_id: jobId,
+                            subcategory: 'Factory Order'
+                        }));
+                    }
+                });
+            } catch (err) {
+                console.error('Error creating subcategory:', err);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Server error: ' + err.message }));
+            }
+        });
+        return;
+    }
+    
+    if (req.url.match(/\/api\/jobs\/[^\/]+\/subcategories$/) && req.method === 'DELETE') {
+        try {
+            const urlParts = req.url.split('/');
+            const jobId = decodeURIComponent(urlParts[urlParts.length - 2]);
+            
+            console.log(`Deleting Factory Order subcategory for job: ${jobId}`);
+            
+            if (!db.jobSubcategories[jobId]) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Factory Order not found' }));
+                return;
+            }
+            
+            // Delete the subcategory
+            delete db.jobSubcategories[jobId];
+            
+            // Delete all individual chats for this job
+            delete db.individualChats[jobId];
+            
+            // Delete all messages in Factory Order subcategory for this job
+            const originalLength = db.messages.length;
+            db.messages = db.messages.filter(msg => {
+                return !(msg.job_id === jobId && msg.subcategory === 'Factory Order');
+            });
+            const deletedMessages = originalLength - db.messages.length;
+            
+            saveDB();
+            
+            // Broadcast to all clients
+            clients.forEach((clientUser, client) => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({
+                        type: 'factory_order_deleted',
+                        jobId
+                    }));
+                }
+            });
+            
+            console.log(`✓ Factory Order deleted for job: ${jobId} (${deletedMessages} messages deleted)`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, deletedMessages }));
+        } catch (err) {
+            console.error('Error deleting Factory Order:', err);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Server error: ' + err.message }));
+        }
+        return;
+    }
+    
+    if (req.url.match(/\/api\/jobs\/[^\/]+\/chats$/) && req.method === 'GET') {
+        try {
+            const urlParts = req.url.split('/');
+            const jobId = decodeURIComponent(urlParts[urlParts.length - 2]);
+            const chats = db.individualChats[jobId] || [];
+            
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ chats }));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Server error' }));
+        }
+        return;
+    }
+    
+    if (req.url.match(/\/api\/jobs\/[^\/]+\/chats\/[^\/]+$/) && req.method === 'DELETE') {
+        try {
+            const urlParts = req.url.split('/');
+            const jobId = decodeURIComponent(urlParts[urlParts.length - 3]);
+            const chatId = decodeURIComponent(urlParts[urlParts.length - 1]);
+            
+            console.log(`Deleting chat ID "${chatId}" from job: ${jobId}`);
+            
+            if (!db.individualChats[jobId]) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Job not found' }));
+                return;
+            }
+            
+            const chatIndex = db.individualChats[jobId].findIndex(c => c.id === chatId);
+            if (chatIndex === -1) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Chat not found' }));
+                return;
+            }
+            
+            const deletedChat = db.individualChats[jobId][chatIndex];
+            db.individualChats[jobId].splice(chatIndex, 1);
+            saveDB();
+            
+            // Broadcast to all clients
+            clients.forEach((clientUser, client) => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({
+                        type: 'individual_chat_deleted',
+                        jobId,
+                        chatId,
+                        chatName: deletedChat.name
+                    }));
+                }
+            });
+            
+            console.log(`✓ Chat "${deletedChat.name}" deleted from job: ${jobId}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+        } catch (err) {
+            console.error('Error deleting chat:', err);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Server error: ' + err.message }));
+        }
+        return;
+    }
+    
+    if (req.url.match(/\/api\/jobs\/[^\/]+\/chats$/) && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const urlParts = req.url.split('/');
+                const jobId = decodeURIComponent(urlParts[urlParts.length - 2]);
+                const { chatName } = JSON.parse(body);
+                
+                console.log(`Creating chat "${chatName}" for job: ${jobId}`);
+                
+                if (!chatName || chatName.trim().length === 0) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Chat name required' }));
+                    return;
+                }
+                
+                if (!db.individualChats[jobId]) {
+                    db.individualChats[jobId] = [];
+                }
+                
+                // Check for duplicate chat names
+                const exists = db.individualChats[jobId].find(c => c.name === chatName.trim());
+                if (exists) {
+                    res.writeHead(409, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Chat already exists' }));
+                    return;
+                }
+                
+                const chatId = `${jobId}_${Date.now()}`;
+                const newChat = {
+                    id: chatId,
+                    name: chatName.trim(),
+                    created_at: new Date().toISOString()
+                };
+                
+                db.individualChats[jobId].push(newChat);
+                saveDB();
+                
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, chatId }));
+                
+                console.log(`✓ Individual chat created: ${chatName} (ID: ${chatId}) for job: ${jobId}`);
+                
+                // Broadcast chat creation to all clients
+                clients.forEach((clientUser, client) => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify({
+                            type: 'individual_chat_created',
+                            job_id: jobId,
+                            chat: newChat
+                        }));
+                    }
+                });
+            } catch (err) {
+                console.error('Error creating individual chat:', err);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Server error: ' + err.message }));
+            }
+        });
+        return;
+    }
+    
+    // ==================== PROBLEM-SOLUTION-REFLEX SYSTEM ====================
+    
+    // Get problems for a job
+    if (req.url.match(/\/api\/jobs\/[^\/]+\/problems$/) && req.method === 'GET') {
+        try {
+            const urlParts = req.url.split('/');
+            const jobId = decodeURIComponent(urlParts[urlParts.length - 2]);
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const status = url.searchParams.get('status') || 'unsolved';
+            const subcategory = url.searchParams.get('subcategory');
+            const chatId = url.searchParams.get('chat_id');
+            
+            console.log(`Getting problems for job: ${jobId}, status: ${status}, subcategory: ${subcategory}, chatId: ${chatId}`);
+            
+            // Filter problems by context
+            const problems = Object.values(db.problems).filter(p => {
+                if (p.job_id !== jobId) return false;
+                if (status && p.status !== status) return false;
+                
+                // Context filtering
+                if (subcategory === 'General') {
+                    // General shows ALL problems for the job
+                    return true;
+                } else if (subcategory === 'Factory Order') {
+                    // Factory Order context
+                    if (p.subcategory !== 'Factory Order') return false;
+                    if (chatId && chatId !== 'null') {
+                        // Specific chat - only show problems for this chat
+                        return p.individual_chat_id === chatId;
+                    }
+                    // "All" - show all Factory Order problems
+                    return true;
+                } else {
+                    // Other subcategories
+                    return p.subcategory === subcategory;
+                }
+            });
+            
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ problems }));
+        } catch (err) {
+            console.error('Error getting problems:', err);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Server error: ' + err.message }));
+        }
+        return;
+    }
+    
+    // Create problem
+    if (req.url.match(/\/api\/jobs\/[^\/]+\/problems$/) && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const urlParts = req.url.split('/');
+                const jobId = decodeURIComponent(urlParts[urlParts.length - 2]);
+                const { problem_text, subcategory, individual_chat_id, username } = JSON.parse(body);
+                
+                console.log(`Creating problem for job: ${jobId}, subcategory: ${subcategory}, chat: ${individual_chat_id}`);
+                
+                if (!problem_text || problem_text.trim().length === 0) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Problem text required' }));
+                    return;
+                }
+                
+                const problemId = crypto.randomUUID();
+                const problem = {
+                    id: problemId,
+                    job_id: jobId,
+                    subcategory: subcategory || 'Seeking Solution',
+                    individual_chat_id: individual_chat_id || null,
+                    problem_text: problem_text.trim(),
+                    solution_text: null,
+                    status: 'unsolved',
+                    created_by: username,
+                    created_at: new Date().toISOString(),
+                    solved_by: null,
+                    solved_at: null
+                };
+                
+                db.problems[problemId] = problem;
+                saveDB();
+                
+                // Broadcast to all clients
+                clients.forEach((clientUser, client) => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify({
+                            type: 'problem_created',
+                            data: problem,
+                            context: { job_id: jobId, subcategory, chat_id: individual_chat_id }
+                        }));
+                    }
+                });
+                
+                console.log(`✓ Problem created: ${problemId}`);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, problem }));
+            } catch (err) {
+                console.error('Error creating problem:', err);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Server error: ' + err.message }));
+            }
+        });
+        return;
+    }
+    
+    // Solve problem (add solution)
+    if (req.url.match(/\/api\/problems\/[^\/]+\/solution$/) && req.method === 'PUT') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const urlParts = req.url.split('/');
+                const problemId = decodeURIComponent(urlParts[urlParts.length - 2]);
+                const { solution_text, username } = JSON.parse(body);
+                
+                console.log(`Solving problem: ${problemId}`);
+                
+                if (!db.problems[problemId]) {
+                    res.writeHead(404, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Problem not found' }));
+                    return;
+                }
+                
+                if (!solution_text || solution_text.trim().length === 0) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Solution text required' }));
+                    return;
+                }
+                
+                db.problems[problemId].solution_text = solution_text.trim();
+                db.problems[problemId].status = 'solved';
+                db.problems[problemId].solved_by = username;
+                db.problems[problemId].solved_at = new Date().toISOString();
+                saveDB();
+                
+                // Broadcast reflex event
+                clients.forEach((clientUser, client) => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify({
+                            type: 'problem_solved',
+                            data: db.problems[problemId],
+                            reflex: true
+                        }));
+                    }
+                });
+                
+                console.log(`✨ REFLEX FOUND! Problem ${problemId} solved by ${username}`);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, problem: db.problems[problemId] }));
+            } catch (err) {
+                console.error('Error solving problem:', err);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Server error: ' + err.message }));
+            }
+        });
+        return;
+    }
+    
+    // Delete problem
+    if (req.url.match(/\/api\/problems\/[^\/]+$/) && req.method === 'DELETE') {
+        try {
+            const urlParts = req.url.split('/');
+            const problemId = decodeURIComponent(urlParts[urlParts.length - 1]);
+            
+            console.log(`Deleting problem: ${problemId}`);
+            
+            if (!db.problems[problemId]) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Problem not found' }));
+                return;
+            }
+            
+            const deletedProblem = db.problems[problemId];
+            delete db.problems[problemId];
+            saveDB();
+            
+            // Broadcast deletion
+            clients.forEach((clientUser, client) => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({
+                        type: 'problem_deleted',
+                        data: { problem_id: problemId },
+                        context: {
+                            job_id: deletedProblem.job_id,
+                            subcategory: deletedProblem.subcategory,
+                            chat_id: deletedProblem.individual_chat_id
+                        }
+                    }));
+                }
+            });
+            
+            console.log(`✓ Problem deleted: ${problemId}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+        } catch (err) {
+            console.error('Error deleting problem:', err);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Server error: ' + err.message }));
+        }
+        return;
+    }
+    
+    // ==================== END PROBLEM SYSTEM ====================
+    
+    if (req.url.startsWith('/api/messages') && req.method === 'GET') {
+        try {
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const jobId = url.searchParams.get('job_id');
+            
+            let filteredMessages = db.messages;
+            if (jobId) {
+                filteredMessages = db.messages.filter(msg => msg.job_id === jobId);
+            }
+            
+            const recentMessages = filteredMessages.slice(-50);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ messages: recentMessages }));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Server error' }));
+        }
+        return;
+    }
+    
+    if (req.url.startsWith('/api/messages') && req.method === 'DELETE') {
+        try {
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const jobId = url.searchParams.get('job_id');
+            const subcategory = url.searchParams.get('subcategory');
+            const chatId = url.searchParams.get('chat_id');
+            const username = url.searchParams.get('username');
+            
+            console.log(`Deleting messages for user: ${username}, job: ${jobId}, subcategory: ${subcategory}, chat: ${chatId}`);
+            
+            // Delete messages that match ALL provided criteria
+            const originalLength = db.messages.length;
+            db.messages = db.messages.filter(msg => {
+                // Check each criterion - must match ALL to be deleted
+                let shouldDelete = true;
+                
+                if (username && msg.username !== username) shouldDelete = false;
+                if (jobId && msg.job_id !== jobId) shouldDelete = false;
+                if (subcategory && (msg.subcategory || 'Seeking Solution') !== subcategory) shouldDelete = false;
+                if (chatId && msg.individual_chat_id !== chatId) shouldDelete = false;
+                
+                // Return true to KEEP, false to DELETE
+                return !shouldDelete;
+            });
+            
+            const deletedCount = originalLength - db.messages.length;
+            saveDB();
+            
+            console.log(`✓ Deleted ${deletedCount} messages`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, deletedCount }));
+        } catch (err) {
+            console.error('Error deleting messages:', err);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Server error: ' + err.message }));
+        }
+        return;
+    }
+    
+    // Serve static files
+    let filePath = path.join(__dirname, 'public', req.url === '/' ? 'index.html' : req.url);
+    const extname = path.extname(filePath);
+    
+    const contentTypes = {
+        '.html': 'text/html',
+        '.css': 'text/css',
+        '.js': 'application/javascript'
+    };
+    
+    const contentType = contentTypes[extname] || 'text/plain';
+    
+    fs.readFile(filePath, (err, content) => {
+        if (err) {
+            if (err.code === 'ENOENT') {
+                res.writeHead(404);
+                res.end('File not found');
+            } else {
+                res.writeHead(500);
+                res.end('Server error');
+            }
+        } else {
+            res.writeHead(200, { 'Content-Type': contentType });
+            res.end(content, 'utf-8');
+        }
+    });
+});
+
+// Create WebSocket server
+const wss = new WebSocket.Server({ server });
+
+const clients = new Map(); // Map of ws -> user info
+
+wss.on('connection', (ws) => {
+    console.log('New client connected');
+    
+    ws.on('message', (message) => {
+        try {
+            const data = JSON.parse(message.toString());
+            
+            // Handle authentication
+            if (data.type === 'auth') {
+                const user = db.users[data.username];
+                if (user) {
+                    clients.set(ws, user);
+                    ws.send(JSON.stringify({ type: 'auth_success', user }));
+                    console.log(`User authenticated: ${user.username}`);
+                } else {
+                    ws.send(JSON.stringify({ type: 'auth_error', error: 'User not found' }));
+                }
+                return;
+            }
+            
+            // Handle messages
+            if (data.type === 'message') {
+                const user = clients.get(ws);
+                if (!user) {
+                    ws.send(JSON.stringify({ type: 'error', error: 'Not authenticated' }));
+                    return;
+                }
+                
+                const timestamp = new Date().toISOString();
+                const jobId = data.job_id || 'General';
+                const subcategory = data.subcategory || null;
+                const individualChatId = data.individual_chat_id || null;
+                
+                const messageData = {
+                    type: 'message',
+                    id: db.messages.length + 1,
+                    user_id: user.id,
+                    username: user.username,
+                    text: data.text,
+                    job_id: jobId,
+                    subcategory: subcategory,
+                    individual_chat_id: individualChatId,
+                    timestamp: timestamp
+                };
+                
+                // Save to database
+                db.messages.push(messageData);
+                saveDB();
+                
+                console.log(`Message from ${user.username} [${jobId}]:`, data.text);
+                
+                // Broadcast to all connected clients
+                clients.forEach((clientUser, client) => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify(messageData));
+                    }
+                });
+            }
+        } catch (err) {
+            console.error('Message handling error:', err);
+            ws.send(JSON.stringify({ type: 'error', error: 'Invalid message format' }));
+        }
+    });
+    
+    ws.on('close', () => {
+        const user = clients.get(ws);
+        if (user) {
+            console.log(`Client disconnected: ${user.username}`);
+        } else {
+            console.log('Client disconnected');
+        }
+        clients.delete(ws);
+    });
+});
+
+// Get local IP address
+function getLocalIP() {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
+    }
+    return 'localhost';
+}
+
+server.listen(PORT, '0.0.0.0', () => {
+    const localIP = getLocalIP();
+    console.log('=====================================')
+    console.log('Feature Millwork Chat Started');
+    console.log('=====================================');
+    console.log(`Local access: http://localhost:${PORT}`);
+    console.log(`Network access: http://${localIP}:${PORT}`);
+    console.log('=====================================');
+    console.log('Share the network URL with devices on the same WiFi');
+    console.log('Press Ctrl+C to stop the server');
+});

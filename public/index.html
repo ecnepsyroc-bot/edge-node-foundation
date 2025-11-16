@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feature Millwork Chat</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal">
+        <div class="modal-content">
+            <h2>Enter Your Name</h2>
+            <input type="text" id="username-input" placeholder="Your name..." autocomplete="off" maxlength="20">
+            <button id="login-btn">Join Chat</button>
+        </div>
+    </div>
+
+    <!-- Create Job Modal -->
+    <div id="create-job-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Create New Job</h2>
+            <input type="text" id="job-name-input" placeholder="Job name..." autocomplete="off" maxlength="50">
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button id="create-job-btn" style="flex: 1;">Create</button>
+                <button id="cancel-job-btn" style="flex: 1; background: #2a2a2a; color: #e9edef;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Individual Chat Modal -->
+    <div id="create-chat-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>New Individual Chat</h2>
+            <input type="text" id="chat-name-input" placeholder="Chat name (e.g., Order #123)..." autocomplete="off" maxlength="50">
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button id="create-chat-btn" style="flex: 1;">Create</button>
+                <button id="cancel-chat-btn" style="flex: 1; background: #2a2a2a; color: #e9edef;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Problem Modal -->
+    <div id="create-problem-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>🔴 New Problem</h2>
+            <textarea id="problem-text-input" placeholder="Describe the problem..." autocomplete="off" maxlength="500" rows="4" style="width: 100%; resize: vertical; padding: 8px; border-radius: 6px; border: 1px solid #444; background: #1a1a1a; color: #e9edef; font-family: inherit;"></textarea>
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button id="create-problem-btn" style="flex: 1; background: #c62828; color: #fff;">Seek Solution</button>
+                <button id="cancel-problem-btn" style="flex: 1; background: #2a2a2a; color: #e9edef;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Solution Modal -->
+    <div id="add-solution-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>✅ Add Solution</h2>
+            <div id="solution-problem-text" style="padding: 12px; background: #1a1a1a; border-radius: 6px; margin-bottom: 12px; color: #8696a0; font-size: 13px;"></div>
+            <textarea id="solution-text-input" placeholder="Describe the solution..." autocomplete="off" maxlength="500" rows="4" style="width: 100%; resize: vertical; padding: 8px; border-radius: 6px; border: 1px solid #444; background: #1a1a1a; color: #e9edef; font-family: inherit;"></textarea>
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button id="add-solution-btn" style="flex: 1; background: #2e7d32; color: #fff;">Add Solution</button>
+                <button id="cancel-solution-btn" style="flex: 1; background: #2a2a2a; color: #e9edef;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reflex Celebration Popup -->
+    <div id="reflex-popup" class="reflex-popup" style="display: none;">
+        <div class="reflex-content">
+            <div class="reflex-stars">✨</div>
+            <h1 class="reflex-title">Reflex Found!</h1>
+            <div class="reflex-stars">✨</div>
+            <p class="reflex-definition">A reflex is not Reactive, it's a planned process to deliver truth through reality-driven results</p>
+            <div class="reflex-details">
+                <div class="reflex-problem"></div>
+                <div class="reflex-solution"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Interface -->
+    <div id="chat-app" style="display: none;">
+        <div id="chat-header">
+            <div class="header-content">
+                <h1>Feature Millwork Chat</h1>
+                <div class="header-right">
+                    <button id="clear-btn" title="Clear chat history">Clear</button>
+                    <button id="delete-chat-btn" title="Delete this chat" style="display: none;">Delete</button>
+                    <span id="online-status">● <span id="username-display"></span></span>
+                </div>
+            </div>
+        </div>
+        
+        <div id="job-tabs-container">
+            <div id="job-tabs"></div>
+        </div>
+        
+        <div id="subcategory-bar" style="display: none;">
+            <div id="subcategory-tabs"></div>
+        </div>
+        
+        <div id="individual-chats-bar" style="display: none;">
+            <div id="individual-chats"></div>
+        </div>
+        
+        <!-- Problems Bar -->
+        <div id="problems-bar" style="display: none;">
+            <div id="problems-list"></div>
+        </div>
+        
+        <div id="messages"></div>
+        
+        <div id="input-container">
+            <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+            <button id="send-btn">
+                <svg viewBox="0 0 24 24" width="24" height="24">
+                    <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+    
+    <script src="https://unpkg.com/compromise@14.9.0/builds/compromise.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

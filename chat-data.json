@@ -1,0 +1,46 @@
+{
+  "users": {
+    "Cory": {
+      "id": 1,
+      "username": "Cory"
+    },
+    "George": {
+      "id": 2,
+      "username": "George",
+      "created_at": "2025-11-14T23:22:30.393Z"
+    },
+    "Dino": {
+      "id": 3,
+      "username": "Dino",
+      "created_at": "2025-11-14T23:30:52.333Z"
+    },
+    "Cory-s": {
+      "id": 4,
+      "username": "Cory-s",
+      "created_at": "2025-11-14T23:37:51.139Z"
+    }
+  },
+  "messages": [],
+  "jobSubcategories": [
+    {
+      "job": "Cactus Club Boston",
+      "subcategory": "Factory Order"
+    },
+    {
+      "job": "3410 Marpole Avenue",
+      "subcategory": "Factory Order"
+    }
+  ],
+  "individualChats": [
+    {
+      "job": "Cactus Club Boston",
+      "subcategory": "Factory Order",
+      "chatName": "1232456"
+    },
+    {
+      "job": "3410 Marpole Avenue",
+      "subcategory": "Factory Order",
+      "chatName": "11235"
+    }
+  ]
+}
