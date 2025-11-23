@@ -214,15 +214,20 @@ class ChatManager {
     }
 
     const result = await this.pool.query(
-      `DELETE FROM messages m
-       USING jobs j
-       LEFT JOIN subcategories s ON m.subcategory_id = s.id
-       LEFT JOIN individual_chats ic ON m.individual_chat_id = ic.id
-       WHERE m.job_id = j.id
-         AND j.name = $1
-         AND (s.name = $2 OR ($2 IS NULL AND m.subcategory_id IS NULL))
-         AND (ic.chat_name = $3 OR ($3 IS NULL AND m.individual_chat_id IS NULL))
-         AND m.is_problem = FALSE`,
+      `WITH job_lookup AS (
+         SELECT id FROM jobs WHERE name = $1
+       )
+       DELETE FROM messages 
+       WHERE job_id = (SELECT id FROM job_lookup)
+         AND (subcategory_id = (
+           SELECT id FROM subcategories 
+           WHERE job_id = (SELECT id FROM job_lookup) AND name = $2
+         ) OR ($2 IS NULL AND subcategory_id IS NULL))
+         AND (individual_chat_id = (
+           SELECT id FROM individual_chats 
+           WHERE job_id = (SELECT id FROM job_lookup) AND chat_name = $3
+         ) OR ($3 IS NULL AND individual_chat_id IS NULL))
+         AND is_problem = FALSE`,
       [job, subcategory, chatName]
     );
 
@@ -352,14 +357,14 @@ class ChatManager {
     }
     const jobId = jobResult.rows[0].id;
 
-    // Get subcategory ID
+    // Get or create subcategory
     const subcatResult = await this.pool.query(
-      'SELECT id FROM subcategories WHERE job_id = $1 AND name = $2',
+      `INSERT INTO subcategories (job_id, name) 
+       VALUES ($1, $2) 
+       ON CONFLICT (job_id, name) DO UPDATE SET name = EXCLUDED.name
+       RETURNING id`,
       [jobId, data.subcategory]
     );
-    if (subcatResult.rows.length === 0) {
-      throw new Error('Subcategory not found');
-    }
     const subcategoryId = subcatResult.rows[0].id;
 
     // Insert individual chat

@@ -374,12 +374,14 @@ async function handleHTTPRequest(req, res) {
   // Create individual chat endpoint
   if (req.url.match(/^\/api\/jobs\/[^\/]+\/chats$/) && req.method === 'POST') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
+    console.log('Create chat request - Job:', jobName);
     parseBody(req, async (err, data) => {
       if (err || !data.chatName) {
         sendJSON(res, 400, { error: 'Chat name required' });
         return;
       }
       try {
+        console.log('Creating chat:', data.chatName, 'for job:', jobName);
         const createdChat = await chatJobsGraft.createIndividualChat(jobName, 'Chat-pads', data.chatName);
         sendJSON(res, 200, { success: true, chatId: createdChat.id });
         
