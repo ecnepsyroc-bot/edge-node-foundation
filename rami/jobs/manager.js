@@ -9,16 +9,37 @@ const { validateJobName, validateSubcategory, validateChatName } = require('../.
 
 class JobsManager {
   constructor(chatManager = null) {
-    // Load jobs from database if available, otherwise use defaults
-    const storedJobs = chatManager ? chatManager.getJobNames() : null;
-    this.jobs = storedJobs ? [...storedJobs] : [...defaults.predefinedJobs];
+    // Jobs will be loaded asynchronously via initialize()
+    this.jobs = [];
     this.chatManager = chatManager;
     this.defaultSubcategory = defaults.defaultSubcategory;
+    this.initialized = false;
+  }
+
+  /**
+   * Initialize jobs from database (async)
+   */
+  async initialize() {
+    if (this.initialized) return;
     
-    // If we loaded from defaults and have a chatManager, save the initial list
-    if (!storedJobs && chatManager) {
-      chatManager.setJobNames(this.jobs);
+    if (this.chatManager) {
+      try {
+        const storedJobs = await this.chatManager.getJobNames();
+        this.jobs = storedJobs && storedJobs.length > 0 ? [...storedJobs] : [...defaults.predefinedJobs];
+        
+        // If we loaded from defaults, save them
+        if (!storedJobs || storedJobs.length === 0) {
+          await this.chatManager.setJobNames(this.jobs);
+        }
+      } catch (error) {
+        console.error('Failed to load jobs from database:', error);
+        this.jobs = [...defaults.predefinedJobs];
+      }
+    } else {
+      this.jobs = [...defaults.predefinedJobs];
     }
+    
+    this.initialized = true;
   }
 
   /**

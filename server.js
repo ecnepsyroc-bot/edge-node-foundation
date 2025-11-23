@@ -26,13 +26,22 @@ const UINLPGraft = require('./grafts/ui-nlp');
 
 // Configuration
 const PORT = config.server.port;
-const DB_FILE = path.join(__dirname, config.database.json.path);
 const PUBLIC_DIR = path.join(__dirname, 'leaves', 'ui');
 
-// Initialize Rami
-const chatManager = new ChatManager(DB_FILE);
+// Initialize Rami (PostgreSQL - no DB file path needed)
+const chatManager = new ChatManager();
 const jobsManager = new JobsManager(chatManager);
 const nlpProcessor = new NLPProcessor();
+
+// Initialize async components
+(async () => {
+  try {
+    await jobsManager.initialize();
+    console.log('Jobs initialized from database');
+  } catch (error) {
+    console.error('Failed to initialize jobs:', error);
+  }
+})();
 
 // Server State
 const clients = new Set();
@@ -133,9 +142,10 @@ function getNetworkIP() {
 /**
  * HTTP Request Handler (assembled from grafts)
  */
-function handleHTTPRequest(req, res) {
+async function handleHTTPRequest(req, res) {
   // Try server-chat graft endpoints
-  if (serverChatGraft.handleHTTPRequest(req, res)) {
+  const handled = await serverChatGraft.handleHTTPRequest(req, res);
+  if (handled) {
     return;
   }
 
@@ -146,7 +156,7 @@ function handleHTTPRequest(req, res) {
 
   // Jobs endpoint
   if (req.url === '/api/jobs' && req.method === 'GET') {
-    const jobs = chatJobsGraft.getJobsWithSubcategories();
+    const jobs = await chatJobsGraft.getJobsWithSubcategories();
     sendJSON(res, 200, { jobs });
     return;
   }
@@ -177,13 +187,13 @@ function handleHTTPRequest(req, res) {
   // Update job code endpoint
   if (req.url.match(/^\/api\/jobs\/[^\/]+\/code$/) && req.method === 'PATCH') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
-    parseBody(req, (err, data) => {
+    parseBody(req, async (err, data) => {
       if (err) {
         sendJSON(res, 400, { error: 'Invalid request body' });
         return;
       }
       try {
-        const code = chatManager.setJobCode(jobName, data.code || '');
+        const code = await chatManager.setJobCode(jobName, data.code || '');
         sendJSON(res, 200, { success: true, code });
       } catch (error) {
         sendJSON(res, 400, { error: error.message });
@@ -195,7 +205,7 @@ function handleHTTPRequest(req, res) {
   // Job subcategories endpoint
   if (req.url.match(/^\/api\/jobs\/[^\/]+\/subcategories$/) && req.method === 'GET') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
-    const subcategories = chatManager.getJobSubcategories(jobName);
+    const subcategories = await chatManager.getJobSubcategories(jobName);
     const hasChatPads = subcategories.some(s => s.subcategory === 'Chat-pads');
     sendJSON(res, 200, { hasChatPads, subcategories });
     return;
@@ -204,13 +214,13 @@ function handleHTTPRequest(req, res) {
   // Create subcategory endpoint
   if (req.url.match(/^\/api\/jobs\/[^\/]+\/subcategories$/) && req.method === 'POST') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
-    parseBody(req, (err, data) => {
+    parseBody(req, async (err, data) => {
       if (err || !data.subcategory) {
         sendJSON(res, 400, { error: 'Subcategory required' });
         return;
       }
       try {
-        chatJobsGraft.createSubcategory(jobName, data.subcategory);
+        await chatJobsGraft.createSubcategory(jobName, data.subcategory);
         sendJSON(res, 200, { success: true });
         
         // Broadcast to all clients
@@ -231,7 +241,7 @@ function handleHTTPRequest(req, res) {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
     
     // Delete Chat-pads subcategory and all related data
-    const deleted = chatManager.deleteJobSubcategory(jobName, 'Chat-pads');
+    const deleted = await chatManager.deleteJobSubcategory(jobName, 'Chat-pads');
     
     sendJSON(res, 200, { 
       success: true, 
@@ -251,13 +261,13 @@ function handleHTTPRequest(req, res) {
   // Update job code endpoint
   if (req.url.match(/^\/api\/jobs\/[^\/]+\/code$/) && req.method === 'PATCH') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
-    parseBody(req, (err, data) => {
+    parseBody(req, async (err, data) => {
       if (err) {
         sendJSON(res, 400, { error: 'Invalid request' });
         return;
       }
       try {
-        chatManager.setJobCode(jobName, data.code || '');
+        await chatManager.setJobCode(jobName, data.code || '');
         sendJSON(res, 200, { success: true, code: data.code });
       } catch (error) {
         sendJSON(res, 400, { error: error.message });
@@ -269,13 +279,13 @@ function handleHTTPRequest(req, res) {
   // Rename job endpoint
   if (req.url.match(/^\/api\/jobs\/[^\/]+\/rename$/) && req.method === 'PATCH') {
     const oldName = decodeURIComponent(req.url.split('/')[3]);
-    parseBody(req, (err, data) => {
+    parseBody(req, async (err, data) => {
       if (err || !data.newName) {
         sendJSON(res, 400, { error: 'New name required' });
         return;
       }
       try {
-        const result = chatJobsGraft.renameJob(oldName, data.newName);
+        const result = await chatJobsGraft.renameJob(oldName, data.newName);
         sendJSON(res, 200, { success: true, ...result });
         
         // Broadcast to all clients
@@ -294,13 +304,13 @@ function handleHTTPRequest(req, res) {
   // Archive/Unarchive job endpoint
   if (req.url.match(/^\/api\/jobs\/[^\/]+\/archive$/) && req.method === 'PATCH') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
-    parseBody(req, (err, data) => {
+    parseBody(req, async (err, data) => {
       if (err || data.archived === undefined) {
         sendJSON(res, 400, { error: 'Archived status required' });
         return;
       }
       try {
-        const result = chatJobsGraft.archiveJob(jobName, data.archived);
+        const result = await chatJobsGraft.archiveJob(jobName, data.archived);
         sendJSON(res, 200, { success: true, ...result });
         
         // Broadcast to all clients
@@ -319,13 +329,13 @@ function handleHTTPRequest(req, res) {
   // Update message chat-pad assignment endpoint
   if (req.url.match(/^\/api\/messages\/[^\/]+\/chatpad$/) && req.method === 'PATCH') {
     const messageId = decodeURIComponent(req.url.split('/')[3]);
-    parseBody(req, (err, data) => {
+    parseBody(req, async (err, data) => {
       if (err || !data.individualChatId) {
         sendJSON(res, 400, { error: 'Individual chat ID required' });
         return;
       }
       try {
-        const result = chatManager.updateMessageChatpad(messageId, data.individualChatId);
+        const result = await chatManager.updateMessageChatpad(messageId, data.individualChatId);
         sendJSON(res, 200, { success: true, ...result });
         
         // Broadcast to all clients
@@ -347,7 +357,7 @@ function handleHTTPRequest(req, res) {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
     
     try {
-      const result = chatJobsGraft.deleteJob(jobName);
+      const result = await chatJobsGraft.deleteJob(jobName);
       sendJSON(res, 200, { success: true, ...result });
       
       // Broadcast to all clients
@@ -364,13 +374,13 @@ function handleHTTPRequest(req, res) {
   // Create individual chat endpoint
   if (req.url.match(/^\/api\/jobs\/[^\/]+\/chats$/) && req.method === 'POST') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
-    parseBody(req, (err, data) => {
+    parseBody(req, async (err, data) => {
       if (err || !data.chatName) {
         sendJSON(res, 400, { error: 'Chat name required' });
         return;
       }
       try {
-        const createdChat = chatJobsGraft.createIndividualChat(jobName, 'Chat-pads', data.chatName);
+        const createdChat = await chatJobsGraft.createIndividualChat(jobName, 'Chat-pads', data.chatName);
         sendJSON(res, 200, { success: true, chatId: createdChat.id });
         
         // Broadcast to all clients with chat ID and username
@@ -392,7 +402,7 @@ function handleHTTPRequest(req, res) {
   // Get individual chats endpoint
   if (req.url.match(/^\/api\/jobs\/[^\/]+\/chats$/) && req.method === 'GET') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
-    const chats = chatManager.getIndividualChats(jobName, 'Chat-pads');
+    const chats = await chatManager.getIndividualChats(jobName, 'Chat-pads');
     // Convert to format client expects
     const formatted = chats.map((c, idx) => ({
       id: `${jobName}_${c.chatName}`,
@@ -410,7 +420,7 @@ function handleHTTPRequest(req, res) {
     // Extract chat name from chat ID (format: "jobName_chatName")
     const chatName = chatId.split('_').slice(1).join('_');
     
-    const deleted = chatManager.deleteIndividualChat(jobName, 'Chat-pads', chatName);
+    const deleted = await chatManager.deleteIndividualChat(jobName, 'Chat-pads', chatName);
     
     sendJSON(res, 200, { 
       success: true, 
@@ -438,12 +448,18 @@ function handleHTTPRequest(req, res) {
 /**
  * WebSocket Message Handler (assembled from grafts)
  */
-function handleWebSocketMessage(data, ws, broadcast) {
-  serverChatGraft.handleWebSocketMessage(data, ws, broadcast);
+async function handleWebSocketMessage(data, ws, broadcast) {
+  await serverChatGraft.handleWebSocketMessage(data, ws, broadcast);
 }
 
-// Create HTTP server
-server = http.createServer(handleHTTPRequest);
+// Create HTTP server with async wrapper
+server = http.createServer((req, res) => {
+  handleHTTPRequest(req, res).catch(err => {
+    console.error('HTTP handler error:', err);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Internal server error' }));
+  });
+});
 
 // Create WebSocket server
 wss = new WebSocket.Server({ server });
@@ -453,10 +469,10 @@ wss.on('connection', (ws) => {
   console.log('Client connected');
   clients.add(ws);
 
-  ws.on('message', (data) => {
+  ws.on('message', async (data) => {
     try {
       const parsed = JSON.parse(data);
-      handleWebSocketMessage(parsed, ws, broadcast);
+      await handleWebSocketMessage(parsed, ws, broadcast);
     } catch (err) {
       console.error('Failed to parse WebSocket message:', err);
     }

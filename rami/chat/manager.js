@@ -1,229 +1,293 @@
 /**
- * RAMUS: Chat
+ * RAMUS: Chat (PostgreSQL)
  * 
- * Manages chat messages, users, and chat organization
+ * Manages chat messages, users, and chat organization using PostgreSQL
  */
 
-const fs = require('fs');
-const path = require('path');
-const { defaults } = require('./schemas');
+require('dotenv').config();
+const pool = require('../database/pool');
 const { sanitizeMessage, sanitizeJobSubcategory, sanitizeIndividualChat } = require('../../sap/validators');
 
 class ChatManager {
-  constructor(dbFilePath) {
-    this.dbFilePath = dbFilePath;
-    this.db = this.loadDatabase();
-  }
-
-  /**
-   * Load database from disk
-   */
-  loadDatabase() {
-    if (!fs.existsSync(this.dbFilePath)) {
-      return { ...defaults.database, jobCodes: {}, jobArchived: {}, jobNames: null };
-    }
-
-    try {
-      const loadedData = JSON.parse(fs.readFileSync(this.dbFilePath, 'utf8'));
-      
-      // Migrate old format to new format
-      let jobSubcategories = loadedData.jobSubcategories || [];
-      let individualChats = loadedData.individualChats || [];
-      let jobCodes = loadedData.jobCodes || {};
-      let jobArchived = loadedData.jobArchived || {};
-      let jobNames = loadedData.jobNames || null;
-      
-      // Convert old object format to array format for jobSubcategories
-      if (!Array.isArray(jobSubcategories)) {
-        const converted = [];
-        for (const [job, hasChatPads] of Object.entries(jobSubcategories)) {
-          if (hasChatPads) {
-            converted.push({ job, subcategory: 'Chat-pads' });
-          }
-        }
-        jobSubcategories = converted;
-      }
-      
-      // Convert old object format to array format for individualChats
-      if (!Array.isArray(individualChats)) {
-        const converted = [];
-        for (const [job, chats] of Object.entries(individualChats)) {
-          if (Array.isArray(chats)) {
-            chats.forEach(chat => {
-              converted.push({
-                job: job,
-                subcategory: 'Chat-pads',
-                chatName: chat.name || chat.chatName || 'Unnamed'
-              });
-            });
-          }
-        }
-        individualChats = converted;
-      }
-      
-      // Defensive merge to preserve backward compatibility
-      return {
-        users: loadedData.users || {},
-        messages: loadedData.messages || [],
-        jobSubcategories: jobSubcategories,
-        individualChats: individualChats,
-        jobCodes: jobCodes,
-        jobArchived: jobArchived,
-        jobNames: jobNames
-      };
-    } catch (err) {
-      console.error('Failed to load database, using empty:', err.message);
-      return { ...defaults.database, jobCodes: {}, jobArchived: {}, jobNames: null };
-    }
-  }
-
-  /**
-   * Save database to disk
-   */
-  saveDatabase() {
-    try {
-      fs.writeFileSync(this.dbFilePath, JSON.stringify(this.db, null, 2));
-    } catch (err) {
-      console.error('Failed to save database:', err.message);
-    }
+  constructor() {
+    // PostgreSQL-based, no file path needed
+    this.pool = pool;
   }
 
   /**
    * Add a message
    */
-  addMessage(msgData) {
+  async addMessage(msgData) {
     const message = sanitizeMessage(msgData);
-    this.db.messages.push(message);
-    this.saveDatabase();
+    
+    // Get or create user
+    const userResult = await this.pool.query(
+      'INSERT INTO users (username) VALUES ($1) ON CONFLICT (username) DO UPDATE SET last_seen = NOW() RETURNING id',
+      [message.user]
+    );
+    const userId = userResult.rows[0].id;
+
+    // Get or create job
+    const jobResult = await this.pool.query(
+      'INSERT INTO jobs (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING id',
+      [message.job]
+    );
+    let jobId;
+    if (jobResult.rows.length > 0) {
+      jobId = jobResult.rows[0].id;
+    } else {
+      const existingJob = await this.pool.query('SELECT id FROM jobs WHERE name = $1', [message.job]);
+      jobId = existingJob.rows[0].id;
+    }
+
+    // Get subcategory ID if provided
+    let subcategoryId = null;
+    if (message.subcategory) {
+      const subcatResult = await this.pool.query(
+        'SELECT id FROM subcategories WHERE job_id = $1 AND name = $2',
+        [jobId, message.subcategory]
+      );
+      if (subcatResult.rows.length > 0) {
+        subcategoryId = subcatResult.rows[0].id;
+      }
+    }
+
+    // Get individual chat ID if provided
+    let individualChatId = null;
+    if (message.individualChat) {
+      // Extract chat name from individualChat format "jobName_chatName"
+      const parts = message.individualChat.split('_');
+      const chatName = parts.slice(1).join('_');
+      
+      if (chatName && subcategoryId) {
+        const chatResult = await this.pool.query(
+          'SELECT id FROM individual_chats WHERE job_id = $1 AND subcategory_id = $2 AND chat_name = $3',
+          [jobId, subcategoryId, chatName]
+        );
+        if (chatResult.rows.length > 0) {
+          individualChatId = chatResult.rows[0].id;
+        }
+      }
+    }
+
+    // Insert message
+    const result = await this.pool.query(
+      `INSERT INTO messages (user_id, job_id, subcategory_id, individual_chat_id, text, timestamp, is_problem, is_solved)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [
+        userId,
+        jobId,
+        subcategoryId,
+        individualChatId,
+        message.text,
+        message.timestamp || new Date().toISOString(),
+        message.isProblem || false,
+        message.isSolved || false
+      ]
+    );
+
+    message.id = result.rows[0].id.toString();
     return message;
   }
 
   /**
    * Get messages for a job/subcategory/chat
    */
-  getMessages(filters = {}) {
-    let messages = [...this.db.messages];
+  async getMessages(filters = {}) {
+    let query = `
+      SELECT 
+        m.id,
+        u.username as user,
+        j.name as job,
+        s.name as subcategory,
+        CASE 
+          WHEN ic.chat_name IS NOT NULL THEN CONCAT(j.name, '_', ic.chat_name)
+          ELSE NULL
+        END as "individualChat",
+        m.text,
+        m.timestamp,
+        m.is_problem as "isProblem",
+        m.is_solved as "isSolved",
+        m.solution,
+        solved_by.username as "solvedBy",
+        m.solved_at as "solvedAt"
+      FROM messages m
+      JOIN users u ON m.user_id = u.id
+      JOIN jobs j ON m.job_id = j.id
+      LEFT JOIN subcategories s ON m.subcategory_id = s.id
+      LEFT JOIN individual_chats ic ON m.individual_chat_id = ic.id
+      LEFT JOIN users solved_by ON m.solved_by_user_id = solved_by.id
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    let paramCount = 1;
 
     if (filters.job) {
-      messages = messages.filter(m => m.job === filters.job);
+      query += ` AND j.name = $${paramCount}`;
+      params.push(filters.job);
+      paramCount++;
     }
 
     if (filters.subcategory) {
-      messages = messages.filter(m => m.subcategory === filters.subcategory);
+      query += ` AND s.name = $${paramCount}`;
+      params.push(filters.subcategory);
+      paramCount++;
     }
 
     if (filters.individualChat !== undefined && filters.individualChat !== null) {
-      messages = messages.filter(m => m.individualChat === filters.individualChat);
+      // Extract chat name from format "jobName_chatName"
+      const parts = filters.individualChat.split('_');
+      const chatName = parts.slice(1).join('_');
+      query += ` AND ic.chat_name = $${paramCount}`;
+      params.push(chatName);
+      paramCount++;
     }
 
     if (filters.isProblem !== undefined) {
-      messages = messages.filter(m => m.isProblem === filters.isProblem);
+      query += ` AND m.is_problem = $${paramCount}`;
+      params.push(filters.isProblem);
+      paramCount++;
     }
 
-    return messages;
+    query += ' ORDER BY m.timestamp ASC';
+
+    const result = await this.pool.query(query, params);
+    return result.rows.map(row => ({
+      ...row,
+      id: row.id.toString()
+    }));
   }
 
   /**
    * Delete messages by user (excludes isProblem messages)
    */
-  deleteMessagesByUser(username, job, subcategory, individualChat) {
-    const initialLength = this.db.messages.length;
+  async deleteMessagesByUser(username, job, subcategory, individualChat) {
     const targetChat = individualChat === undefined ? null : individualChat;
+    let chatName = null;
     
-    this.db.messages = this.db.messages.filter(msg => {
-      const sameUser = (msg.user || msg.username || '').trim() === username;
-      const messageJob = (msg.job && msg.job.trim()) || (msg.job_id && msg.job_id.trim()) || 'General';
-      const sameJob = messageJob === job;
-      const sameSubcategory = (msg.subcategory || 'Seeking Solution') === subcategory;
-      const msgChat = msg.individualChat !== undefined ? msg.individualChat : msg.individual_chat_id;
-      const sameChat = (msgChat || null) === targetChat;
-      const isProblem = msg.isProblem === true;
-      
-      // Only delete if matches AND is not a problem
-      const shouldDelete = sameUser && sameJob && sameSubcategory && sameChat && !isProblem;
-      return !shouldDelete;
-    });
+    if (targetChat) {
+      const parts = targetChat.split('_');
+      chatName = parts.slice(1).join('_');
+    }
 
-    const deleted = initialLength - this.db.messages.length;
-    this.saveDatabase();
-    return deleted;
+    const result = await this.pool.query(
+      `DELETE FROM messages m
+       USING users u, jobs j
+       LEFT JOIN subcategories s ON m.subcategory_id = s.id
+       LEFT JOIN individual_chats ic ON m.individual_chat_id = ic.id
+       WHERE m.user_id = u.id
+         AND m.job_id = j.id
+         AND u.username = $1
+         AND j.name = $2
+         AND (s.name = $3 OR ($3 IS NULL AND m.subcategory_id IS NULL))
+         AND (ic.chat_name = $4 OR ($4 IS NULL AND m.individual_chat_id IS NULL))
+         AND m.is_problem = FALSE`,
+      [username, job, subcategory, chatName]
+    );
+
+    return result.rowCount;
   }
 
   /**
    * Delete a single message by ID
    */
-  deleteMessageById(messageId) {
-    const initialLength = this.db.messages.length;
-    this.db.messages = this.db.messages.filter(msg => msg.id !== messageId);
-    const deleted = initialLength - this.db.messages.length;
-    this.saveDatabase();
-    return deleted > 0;
+  async deleteMessageById(messageId) {
+    const result = await this.pool.query(
+      'DELETE FROM messages WHERE id = $1',
+      [parseInt(messageId)]
+    );
+    return result.rowCount > 0;
   }
 
   /**
-   * Clear ALL messages in a context (excludes isProblem/Seeking Solution entries)
+   * Clear ALL messages in a context (excludes isProblem/Question entries)
    */
-  clearAllMessages(job, subcategory, individualChat) {
-    const initialLength = this.db.messages.length;
+  async clearAllMessages(job, subcategory, individualChat) {
     const targetChat = individualChat === undefined ? null : individualChat;
+    let chatName = null;
     
-    this.db.messages = this.db.messages.filter(msg => {
-      const messageJob = (msg.job && msg.job.trim()) || (msg.job_id && msg.job_id.trim()) || 'General';
-      const sameJob = messageJob === job;
-      const sameSubcategory = (msg.subcategory || 'Seeking Solution') === subcategory;
-      const msgChat = msg.individualChat !== undefined ? msg.individualChat : msg.individual_chat_id;
-      const sameChat = (msgChat || null) === targetChat;
-      const isQuestion = msg.isProblem === true;
-      
-      // Only delete if matches context AND is NOT a Question
-      const shouldDelete = sameJob && sameSubcategory && sameChat && !isQuestion;
-      return !shouldDelete;
-    });
+    if (targetChat) {
+      const parts = targetChat.split('_');
+      chatName = parts.slice(1).join('_');
+    }
 
-    const deletedCount = initialLength - this.db.messages.length;
-    this.saveDatabase();
-    return deletedCount;
+    const result = await this.pool.query(
+      `DELETE FROM messages m
+       USING jobs j
+       LEFT JOIN subcategories s ON m.subcategory_id = s.id
+       LEFT JOIN individual_chats ic ON m.individual_chat_id = ic.id
+       WHERE m.job_id = j.id
+         AND j.name = $1
+         AND (s.name = $2 OR ($2 IS NULL AND m.subcategory_id IS NULL))
+         AND (ic.chat_name = $3 OR ($3 IS NULL AND m.individual_chat_id IS NULL))
+         AND m.is_problem = FALSE`,
+      [job, subcategory, chatName]
+    );
+
+    return result.rowCount;
   }
 
   /**
    * Mark a problem message as solved with solution text
    */
-  solveMessage(messageId, solution, username) {
-    const message = this.db.messages.find(msg => msg.id === messageId);
+  async solveMessage(messageId, solution, username) {
+    // Get solver user ID
+    const userResult = await this.pool.query(
+      'SELECT id FROM users WHERE username = $1',
+      [username]
+    );
     
-    if (!message) {
-      throw new Error('Message not found');
+    if (userResult.rows.length === 0) {
+      throw new Error('User not found');
     }
-    
-    if (!message.isProblem) {
-      throw new Error('Can only solve problem messages');
+
+    const userId = userResult.rows[0].id;
+
+    // Update message
+    const result = await this.pool.query(
+      `UPDATE messages
+       SET is_solved = TRUE, solution = $1, solved_by_user_id = $2, solved_at = NOW()
+       WHERE id = $3 AND is_problem = TRUE
+       RETURNING id`,
+      [solution, userId, parseInt(messageId)]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('Message not found or not a problem');
     }
-    
-    // Update message with solution
-    message.isSolved = true;
-    message.solution = solution;
-    message.solvedBy = username;
-    message.solvedAt = new Date().toISOString();
-    
-    this.saveDatabase();
-    return message;
+
+    // Return updated message
+    const messages = await this.getMessages({});
+    return messages.find(m => m.id === messageId.toString());
   }
 
   /**
    * Add job subcategory (Chat-pads)
    */
-  addJobSubcategory(job, subcategory) {
+  async addJobSubcategory(job, subcategory) {
     const data = sanitizeJobSubcategory({ job, subcategory });
     
-    // Check if already exists
-    const exists = this.db.jobSubcategories.some(
-      js => js.job === data.job && js.subcategory === data.subcategory
+    // Get or create job
+    const jobResult = await this.pool.query(
+      'INSERT INTO jobs (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING id',
+      [data.job]
     );
-
-    if (!exists) {
-      this.db.jobSubcategories.push(data);
-      this.saveDatabase();
+    
+    let jobId;
+    if (jobResult.rows.length > 0) {
+      jobId = jobResult.rows[0].id;
+    } else {
+      const existingJob = await this.pool.query('SELECT id FROM jobs WHERE name = $1', [data.job]);
+      jobId = existingJob.rows[0].id;
     }
+
+    // Insert subcategory
+    await this.pool.query(
+      'INSERT INTO subcategories (job_id, name) VALUES ($1, $2) ON CONFLICT (job_id, name) DO NOTHING',
+      [jobId, data.subcategory]
+    );
 
     return data;
   }
@@ -231,281 +295,325 @@ class ChatManager {
   /**
    * Get job subcategories
    */
-  getJobSubcategories(job) {
-    return this.db.jobSubcategories.filter(js => js.job === job);
+  async getJobSubcategories(job) {
+    const result = await this.pool.query(
+      `SELECT s.name as subcategory
+       FROM subcategories s
+       JOIN jobs j ON s.job_id = j.id
+       WHERE j.name = $1`,
+      [job]
+    );
+
+    return result.rows.map(row => ({
+      job: job,
+      subcategory: row.subcategory
+    }));
   }
 
   /**
    * Delete job subcategory and all related data
    */
-  deleteJobSubcategory(job, subcategory) {
-    // Remove subcategory
-    this.db.jobSubcategories = this.db.jobSubcategories.filter(
-      js => !(js.job === job && js.subcategory === subcategory)
+  async deleteJobSubcategory(job, subcategory) {
+    const result = await this.pool.query(
+      `DELETE FROM messages m
+       USING jobs j, subcategories s
+       WHERE m.job_id = j.id
+         AND m.subcategory_id = s.id
+         AND j.name = $1
+         AND s.name = $2`,
+      [job, subcategory]
     );
 
-    // Remove individual chats
-    this.db.individualChats = this.db.individualChats.filter(
-      ic => !(ic.job === job && ic.subcategory === subcategory)
+    const deletedCount = result.rowCount;
+
+    // Delete subcategory (CASCADE will handle individual_chats)
+    await this.pool.query(
+      `DELETE FROM subcategories s
+       USING jobs j
+       WHERE s.job_id = j.id
+         AND j.name = $1
+         AND s.name = $2`,
+      [job, subcategory]
     );
 
-    // Count and remove messages AND Questions for this job
-    const initialCount = this.db.messages.length;
-    this.db.messages = this.db.messages.filter(
-      m => {
-        const msgJob = m.job || m.job_id || '';
-        const msgSubcat = m.subcategory || '';
-        // Remove if matches job+subcategory OR if it's a Question for this job
-        const isMatchingMessage = (msgJob === job && msgSubcat === subcategory);
-        const isQuestionForJob = (msgJob === job && m.isProblem === true && m.subcategory === 'Questions');
-        return !(isMatchingMessage || isQuestionForJob);
-      }
-    );
-    const deletedCount = initialCount - this.db.messages.length;
-
-    this.saveDatabase();
     return deletedCount;
   }
 
   /**
    * Add individual chat
    */
-  addIndividualChat(job, subcategory, chatName) {
+  async addIndividualChat(job, subcategory, chatName) {
     const data = sanitizeIndividualChat({ job, subcategory, chatName });
     
-    // Check if already exists
-    const exists = this.db.individualChats.some(
-      ic => ic.job === data.job && 
-            ic.subcategory === data.subcategory && 
-            ic.chatName === data.chatName
+    // Get job ID
+    const jobResult = await this.pool.query('SELECT id FROM jobs WHERE name = $1', [data.job]);
+    if (jobResult.rows.length === 0) {
+      throw new Error('Job not found');
+    }
+    const jobId = jobResult.rows[0].id;
+
+    // Get subcategory ID
+    const subcatResult = await this.pool.query(
+      'SELECT id FROM subcategories WHERE job_id = $1 AND name = $2',
+      [jobId, data.subcategory]
+    );
+    if (subcatResult.rows.length === 0) {
+      throw new Error('Subcategory not found');
+    }
+    const subcategoryId = subcatResult.rows[0].id;
+
+    // Insert individual chat
+    const result = await this.pool.query(
+      'INSERT INTO individual_chats (job_id, subcategory_id, chat_name) VALUES ($1, $2, $3) ON CONFLICT (job_id, subcategory_id, chat_name) DO NOTHING RETURNING id',
+      [jobId, subcategoryId, data.chatName]
     );
 
-    if (!exists) {
-      this.db.individualChats.push(data);
-      this.saveDatabase();
-    }
-
-    return data;
+    return {
+      ...data,
+      id: result.rows.length > 0 ? `${job}_${chatName}` : null
+    };
   }
 
   /**
    * Get individual chats
    */
-  getIndividualChats(job, subcategory) {
-    return this.db.individualChats.filter(
-      ic => ic.job === job && ic.subcategory === subcategory
+  async getIndividualChats(job, subcategory) {
+    const result = await this.pool.query(
+      `SELECT ic.chat_name as "chatName"
+       FROM individual_chats ic
+       JOIN jobs j ON ic.job_id = j.id
+       JOIN subcategories s ON ic.subcategory_id = s.id
+       WHERE j.name = $1 AND s.name = $2
+       ORDER BY ic.created_at ASC`,
+      [job, subcategory]
     );
+
+    return result.rows.map(row => ({
+      job: job,
+      subcategory: subcategory,
+      chatName: row.chatName
+    }));
   }
 
   /**
    * Delete a single individual chat
    */
-  deleteIndividualChat(job, subcategory, chatName) {
-    // Remove the chat
-    this.db.individualChats = this.db.individualChats.filter(
-      ic => !(ic.job === job && ic.subcategory === subcategory && ic.chatName === chatName)
+  async deleteIndividualChat(job, subcategory, chatName) {
+    // Delete messages in this chat
+    const msgResult = await this.pool.query(
+      `DELETE FROM messages m
+       USING jobs j, subcategories s, individual_chats ic
+       WHERE m.job_id = j.id
+         AND m.subcategory_id = s.id
+         AND m.individual_chat_id = ic.id
+         AND j.name = $1
+         AND s.name = $2
+         AND ic.chat_name = $3`,
+      [job, subcategory, chatName]
     );
 
-    // Count and remove messages in this chat AND associated Questions
-    const chatId = `${job}_${chatName}`;
-    const initialCount = this.db.messages.length;
-    this.db.messages = this.db.messages.filter(
-      m => {
-        const msgJob = m.job || m.job_id || '';
-        const msgSubcat = m.subcategory || '';
-        const msgChat = m.individual_chat_id || m.individualChat || '';
-        const isMatchingMessage = (msgJob === job && msgSubcat === subcategory && msgChat === chatId);
-        // Also remove Questions that were created in this specific chat (they reference the job)
-        const isQuestionForChat = (msgJob === job && m.isProblem === true && m.subcategory === 'Questions');
-        return !(isMatchingMessage || isQuestionForChat);
-      }
-    );
-    const deletedCount = initialCount - this.db.messages.length;
+    const deletedCount = msgResult.rowCount;
 
-    this.saveDatabase();
+    // Delete the chat
+    await this.pool.query(
+      `DELETE FROM individual_chats ic
+       USING jobs j, subcategories s
+       WHERE ic.job_id = j.id
+         AND ic.subcategory_id = s.id
+         AND j.name = $1
+         AND s.name = $2
+         AND ic.chat_name = $3`,
+      [job, subcategory, chatName]
+    );
+
     return deletedCount;
   }
 
   /**
    * Register or update user
    */
-  registerUser(username) {
-    if (!this.db.users[username]) {
-      this.db.users[username] = {
-        lastSeen: new Date().toISOString()
-      };
-      this.saveDatabase();
-    }
-    return this.db.users[username];
+  async registerUser(username) {
+    const result = await this.pool.query(
+      'INSERT INTO users (username, last_seen) VALUES ($1, NOW()) ON CONFLICT (username) DO UPDATE SET last_seen = NOW() RETURNING username, last_seen',
+      [username]
+    );
+
+    return {
+      lastSeen: result.rows[0].last_seen
+    };
   }
 
   /**
    * Get all users
    */
-  getUsers() {
-    return { ...this.db.users };
+  async getUsers() {
+    const result = await this.pool.query('SELECT username, last_seen FROM users');
+    
+    const users = {};
+    result.rows.forEach(row => {
+      users[row.username] = {
+        lastSeen: row.last_seen
+      };
+    });
+    
+    return users;
   }
 
   /**
    * Set job code
    */
-  setJobCode(jobName, code) {
-    if (!this.db.jobCodes) {
-      this.db.jobCodes = {};
-    }
-    this.db.jobCodes[jobName] = code;
-    this.saveDatabase();
+  async setJobCode(jobName, code) {
+    await this.pool.query(
+      'INSERT INTO jobs (name, code) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET code = $2',
+      [jobName, code]
+    );
     return code;
   }
 
   /**
    * Get job code
    */
-  getJobCode(jobName) {
-    if (!this.db.jobCodes) {
-      return '';
-    }
-    return this.db.jobCodes[jobName] || '';
+  async getJobCode(jobName) {
+    const result = await this.pool.query(
+      'SELECT code FROM jobs WHERE name = $1',
+      [jobName]
+    );
+    return result.rows.length > 0 ? (result.rows[0].code || '') : '';
   }
 
   /**
    * Get all job codes
    */
-  getAllJobCodes() {
-    return { ...(this.db.jobCodes || {}) };
+  async getAllJobCodes() {
+    const result = await this.pool.query('SELECT name, code FROM jobs WHERE code IS NOT NULL');
+    
+    const codes = {};
+    result.rows.forEach(row => {
+      codes[row.name] = row.code;
+    });
+    
+    return codes;
   }
 
   /**
    * Set job archived status
    */
-  setJobArchived(jobName, archived) {
-    if (!this.db.jobArchived) {
-      this.db.jobArchived = {};
-    }
-    this.db.jobArchived[jobName] = archived;
-    this.saveDatabase();
+  async setJobArchived(jobName, archived) {
+    await this.pool.query(
+      'INSERT INTO jobs (name, archived) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET archived = $2',
+      [jobName, archived]
+    );
     return archived;
   }
 
   /**
    * Get job archived status
    */
-  isJobArchived(jobName) {
-    if (!this.db.jobArchived) {
-      return false;
-    }
-    return this.db.jobArchived[jobName] || false;
+  async isJobArchived(jobName) {
+    const result = await this.pool.query(
+      'SELECT archived FROM jobs WHERE name = $1',
+      [jobName]
+    );
+    return result.rows.length > 0 ? (result.rows[0].archived || false) : false;
   }
 
   /**
    * Get all job archived statuses
    */
-  getAllJobArchived() {
-    return { ...(this.db.jobArchived || {}) };
+  async getAllJobArchived() {
+    const result = await this.pool.query('SELECT name, archived FROM jobs WHERE archived = TRUE');
+    
+    const archived = {};
+    result.rows.forEach(row => {
+      archived[row.name] = row.archived;
+    });
+    
+    return archived;
   }
 
   /**
    * Delete all data for a job
    */
-  deleteJobData(jobName) {
-    // Remove messages
-    const initialMsgCount = this.db.messages.length;
-    this.db.messages = this.db.messages.filter(m => {
-      const msgJob = m.job || m.job_id || '';
-      return msgJob !== jobName;
-    });
-    const deletedMessages = initialMsgCount - this.db.messages.length;
-
-    // Remove subcategories
-    this.db.jobSubcategories = this.db.jobSubcategories.filter(
-      js => js.job !== jobName
+  async deleteJobData(jobName) {
+    // Count messages to be deleted
+    const countResult = await this.pool.query(
+      `SELECT COUNT(*) FROM messages m
+       JOIN jobs j ON m.job_id = j.id
+       WHERE j.name = $1`,
+      [jobName]
     );
+    
+    const deletedMessages = parseInt(countResult.rows[0].count);
 
-    // Remove individual chats
-    this.db.individualChats = this.db.individualChats.filter(
-      ic => ic.job !== jobName
-    );
+    // Delete job (CASCADE will handle everything)
+    await this.pool.query('DELETE FROM jobs WHERE name = $1', [jobName]);
 
-    // Remove job code
-    if (this.db.jobCodes && this.db.jobCodes[jobName]) {
-      delete this.db.jobCodes[jobName];
-    }
-
-    // Remove archived status
-    if (this.db.jobArchived && this.db.jobArchived[jobName]) {
-      delete this.db.jobArchived[jobName];
-    }
-
-    this.saveDatabase();
     return deletedMessages;
   }
 
   /**
    * Rename job in all references
    */
-  renameJobReferences(oldName, newName) {
-    // Update messages
-    this.db.messages.forEach(msg => {
-      if (msg.job === oldName) msg.job = newName;
-      if (msg.job_id === oldName) msg.job_id = newName;
-    });
-
-    // Update job subcategories
-    this.db.jobSubcategories.forEach(js => {
-      if (js.job === oldName) js.job = newName;
-    });
-
-    // Update individual chats
-    this.db.individualChats.forEach(ic => {
-      if (ic.job === oldName) ic.job = newName;
-    });
-
-    // Update job codes
-    if (this.db.jobCodes && this.db.jobCodes[oldName]) {
-      this.db.jobCodes[newName] = this.db.jobCodes[oldName];
-      delete this.db.jobCodes[oldName];
-    }
-
-    // Update archived status
-    if (this.db.jobArchived && this.db.jobArchived[oldName] !== undefined) {
-      this.db.jobArchived[newName] = this.db.jobArchived[oldName];
-      delete this.db.jobArchived[oldName];
-    }
-
-    this.saveDatabase();
+  async renameJobReferences(oldName, newName) {
+    await this.pool.query(
+      'UPDATE jobs SET name = $1 WHERE name = $2',
+      [newName, oldName]
+    );
     return true;
   }
 
   /**
    * Update message chat-pad assignment
    */
-  updateMessageChatpad(messageId, individualChatId) {
-    const message = this.db.messages.find(m => m.id === messageId);
-    
-    if (!message) {
-      throw new Error('Message not found');
+  async updateMessageChatpad(messageId, individualChatId) {
+    // Extract chat name from format "jobName_chatName"
+    const parts = individualChatId.split('_');
+    const jobName = parts[0];
+    const chatName = parts.slice(1).join('_');
+
+    // Get individual chat DB ID
+    const chatResult = await this.pool.query(
+      `SELECT ic.id
+       FROM individual_chats ic
+       JOIN jobs j ON ic.job_id = j.id
+       WHERE j.name = $1 AND ic.chat_name = $2`,
+      [jobName, chatName]
+    );
+
+    if (chatResult.rows.length === 0) {
+      throw new Error('Individual chat not found');
     }
 
-    message.individual_chat_id = individualChatId;
-    message.individualChatId = individualChatId; // Support both formats
+    const chatDbId = chatResult.rows[0].id;
+
+    // Update message
+    await this.pool.query(
+      'UPDATE messages SET individual_chat_id = $1 WHERE id = $2',
+      [chatDbId, parseInt(messageId)]
+    );
+
+    // Return updated message
+    const messages = await this.getMessages({});
+    const message = messages.find(m => m.id === messageId.toString());
     
-    this.saveDatabase();
     return { message };
   }
 
   /**
-   * Get stored job names list
+   * Get stored job names list (PostgreSQL doesn't store this, returns null)
    */
-  getJobNames() {
-    return this.db.jobNames;
+  async getJobNames() {
+    // In PostgreSQL, we don't store a separate job names list
+    // Jobs are managed through the jobs table
+    return null;
   }
 
   /**
-   * Set job names list (called when jobs are modified)
+   * Set job names list (no-op in PostgreSQL)
    */
-  setJobNames(jobNames) {
-    this.db.jobNames = jobNames;
-    this.saveDatabase();
+  async setJobNames(jobNames) {
+    // No-op in PostgreSQL - jobs are managed in jobs table
+    return true;
   }
 }
 
