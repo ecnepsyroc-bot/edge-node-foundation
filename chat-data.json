@@ -1,46 +1,96 @@
 {
   "users": {
     "Cory": {
-      "id": 1,
-      "username": "Cory"
-    },
-    "George": {
-      "id": 2,
-      "username": "George",
-      "created_at": "2025-11-14T23:22:30.393Z"
-    },
-    "Dino": {
-      "id": 3,
-      "username": "Dino",
-      "created_at": "2025-11-14T23:30:52.333Z"
-    },
-    "Cory-s": {
-      "id": 4,
-      "username": "Cory-s",
-      "created_at": "2025-11-14T23:37:51.139Z"
+      "lastSeen": "2025-11-22T18:41:20.14Z"
     }
   },
-  "messages": [],
-  "jobSubcategories": [
+  "messages": [
     {
-      "job": "Cactus Club Boston",
-      "subcategory": "Factory Order"
-    },
-    {
+      "id": "1763863664889",
+      "user": "Cory",
+      "username": "Cory",
+      "text": "Test",
       "job": "3410 Marpole Avenue",
-      "subcategory": "Factory Order"
+      "job_id": "3410 Marpole Avenue",
+      "timestamp": "2025-11-23T02:07:44.889Z",
+      "subcategory": "Chat-pads",
+      "individualChat": null,
+      "individual_chat_id": null,
+      "isProblem": false
     }
   ],
-  "individualChats": [
-    {
-      "job": "Cactus Club Boston",
-      "subcategory": "Factory Order",
-      "chatName": "1232456"
-    },
-    {
-      "job": "3410 Marpole Avenue",
-      "subcategory": "Factory Order",
-      "chatName": "11235"
-    }
+  "jobSubcategories": [],
+  "individualChats": [],
+  "jobCodes": {
+    "Cirnac": "CIR",
+    "Deloitte 2024": "DEL",
+    "Dentons": "DEN",
+    "Disney": "DIS",
+    "ESDC": "ESDC",
+    "EVR": "EVR",
+    "Harbourside- Lot D": "HAR-LOT-D",
+    "Hue": "HUE",
+    "King Taps Lonsdale": "KING-T-LON",
+    "Kings Tap - Park Place": "KING-T-PAR",
+    "LaSalle College": "LAS-COL",
+    "Myriad": "MYR",
+    "Netflix": "NET",
+    "Oakridge - Building 6 & 7": "OAK-B7",
+    "PWC-5th Floor": "PWC-5",
+    "3410 Marpole Avenue": "MARP",
+    "Archetype": "ARCHE",
+    "Bellano": "BELLA",
+    "Blueberry": "BLUEB",
+    "Cactus Club Boston": "CAC-CL-BOS",
+    "Cactus Club Houston": "CAC-CL-HOU",
+    "Cactus Club Miami": "CAC-CL-MIA",
+    "Canaccord 1133": "CANAC",
+    "PWC-7th Floor": "PWC-7",
+    "RBC GAM": "RBC-GAM",
+    "Shape Properties": "SHAPE",
+    "Smith and Farrow": "SF",
+    "Sunlife - Burnaby": "SUN-BUR",
+    "Teck Res. 34th (Phase2)": "TECK-PH-2",
+    "Teck Res. 34th (Phase3)": "TECK-PH-3",
+    "WC Fishing Lodge": "WC-FISH",
+    "YVR 21N": "YVR",
+    "All conversations": "FLOW"
+  },
+  "jobArchived": {},
+  "jobNames": [
+    "All conversations",
+    "3410 Marpole Avenue",
+    "Archetype",
+    "Bellano",
+    "Blueberry",
+    "Cactus Club Boston",
+    "Cactus Club Houston",
+    "Cactus Club Miami",
+    "Canaccord 1133",
+    "Cirnac",
+    "Deloitte 2024",
+    "Dentons",
+    "Disney",
+    "ESDC",
+    "EVR",
+    "Harbourside- Lot D",
+    "Hue",
+    "Keith",
+    "King Taps Lonsdale",
+    "Kings Tap - Park Place",
+    "LaSalle College",
+    "Myriad",
+    "Netflix",
+    "Oakridge - Building 6 & 7",
+    "PWC-5th Floor",
+    "PWC-7th Floor",
+    "RBC GAM",
+    "Shape Properties",
+    "Smith and Farrow",
+    "Sunlife - Burnaby",
+    "Teck Res. 34th (Phase2)",
+    "Teck Res. 34th (Phase3)",
+    "WC Fishing Lodge",
+    "YVR 21N"
   ]
 }

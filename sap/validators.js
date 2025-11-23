@@ -5,7 +5,7 @@
  * Prevents malformed data from corrupting the tree.
  */
 
-const { schemas } = require('../water/schemas');
+const { schemas } = require('../rami/chat/schemas');
 
 /**
  * Sanitize text input

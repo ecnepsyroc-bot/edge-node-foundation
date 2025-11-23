@@ -5,8 +5,8 @@
  */
 
 class ServerChatGraft {
-  constructor(serverManager, chatManager) {
-    this.server = serverManager;
+  constructor(serverFunctions, chatManager) {
+    this.server = serverFunctions;
     this.chat = chatManager;
   }
 
@@ -36,29 +36,42 @@ class ServerChatGraft {
       const subcategory = url.searchParams.get('subcategory');
       const chatId = url.searchParams.get('chat_id');
 
-      const rawMessages = this.chat.getMessages();
-
-      const filtered = rawMessages.filter((msg) => {
-        const messageJob = msg.job || msg.job_id || 'General';
-        if (jobId && messageJob !== jobId) {
-          return false;
-        }
-
-        const messageSubcategory = msg.subcategory || 'Seeking Solution';
-        if (subcategory && messageSubcategory !== subcategory) {
-          return false;
-        }
-
-        const messageChat = msg.individualChat || msg.individual_chat_id || null;
-        if (chatId && messageChat !== chatId) {
-          return false;
-        }
-
-        return true;
+      const rawMessages = this.chat.getMessages({
+        job: jobId,
+        subcategory: subcategory,
+        individualChat: chatId
       });
 
-      const messages = filtered.map((msg) => this.normalizeMessage(msg));
+      const messages = rawMessages.map((msg) => this.normalizeMessage(msg));
       this.server.sendJSON(res, 200, { messages });
+      return true;
+    }
+
+    // Clear ALL messages in chat-pad (except Seeking Solution entries)
+    if (req.url.startsWith('/api/messages/clear') && req.method === 'DELETE') {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const jobId = (url.searchParams.get('job_id') || 'General').trim();
+      const subcategory = (url.searchParams.get('subcategory') || 'Seeking Solution').trim();
+      const chatId = url.searchParams.get('chat_id');
+
+      const deleted = this.chat.clearAllMessages(
+        jobId,
+        subcategory,
+        chatId || null
+      );
+
+      this.server.sendJSON(res, 200, { success: true, deletedCount: deleted });
+
+      if (deleted > 0) {
+        this.server.broadcast({
+          type: 'chat_cleared',
+          job_id: jobId,
+          subcategory: subcategory,
+          chat_id: chatId || null,
+          timestamp: new Date().toISOString()
+        });
+      }
+
       return true;
     }
 
@@ -109,6 +122,37 @@ class ServerChatGraft {
         );
       }
 
+      return true;
+    }
+
+    // Solve a problem message
+    if (req.url.match(/^\/api\/messages\/[^\/]+\/solve$/) && req.method === 'PATCH') {
+      const messageId = req.url.split('/')[3];
+      
+      this.server.parseBody(req, (err, data) => {
+        if (err || !data.solution || !data.username) {
+          this.server.sendJSON(res, 400, { error: 'Solution and username required' });
+          return;
+        }
+        
+        try {
+          const message = this.chat.solveMessage(messageId, data.solution, data.username);
+          this.server.sendJSON(res, 200, { success: true, message });
+          
+          // Broadcast to all clients
+          this.server.broadcast({
+            type: 'problem_solved',
+            message_id: messageId,
+            solution: data.solution,
+            solved_by: data.username,
+            solved_at: message.solvedAt,
+            timestamp: new Date().toISOString()
+          });
+        } catch (error) {
+          this.server.sendJSON(res, 400, { error: error.message });
+        }
+      });
+      
       return true;
     }
 
@@ -251,7 +295,12 @@ class ServerChatGraft {
       job_id: msg.job_id || msg.job || 'General',
       subcategory: msg.subcategory || 'Seeking Solution',
       individual_chat_id: msg.individual_chat_id || msg.individualChat || null,
-      timestamp: msg.timestamp || new Date().toISOString()
+      timestamp: msg.timestamp || new Date().toISOString(),
+      isProblem: msg.isProblem || false,
+      isSolved: msg.isSolved || false,
+      solution: msg.solution || '',
+      solvedBy: msg.solvedBy || '',
+      solvedAt: msg.solvedAt || null
     };
   }
 

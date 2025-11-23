@@ -1,4 +1,3 @@
-# Shop Communication Tool
 
 ## Project Overview
 Simple shop communication tool with:

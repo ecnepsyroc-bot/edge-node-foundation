@@ -28,12 +28,12 @@ A lightweight, WhatsApp-style messaging system for a millwork / factory environm
 
 The system is built using **Luxify Tree** modular architecture to prevent "AI mush" and enable sustainable growth:
 
-#### **Branches** (Core Modules)
-- `branches/server/` - HTTP and WebSocket server management
-- `branches/chat/` - Message handling, storage, and retrieval
-- `branches/jobs/` - Job listings and subcategory management
-- `branches/ui/` - Client-side interface (HTML/CSS/JS)
-- `branches/nlp/` - Part-of-speech tagging with compromise.js
+#### **Rami** (Core Modules)
+- `rami/server/` - HTTP and WebSocket server management
+- `rami/chat/` - Message handling, storage, and retrieval
+- `rami/jobs/` - Job listings and subcategory management
+- `rami/ui/` - Client-side interface (HTML/CSS/JS)
+- `rami/nlp/` - Part-of-speech tagging with compromise.js
 
 #### **Grafts** (Integration Layer)
 - `grafts/server-chat.js` - Connects server to chat system
@@ -47,7 +47,7 @@ The system is built using **Luxify Tree** modular architecture to prevent "AI mu
 - `sap/validators.js` - Input sanitization and validation guards
 
 #### **Orchestrator**
-- `server.js` - Lightweight assembly file that connects all branches via grafts
+- `server.js` - Lightweight assembly file that connects all rami via grafts
 
 ### 3. Job-Based Messaging
 
@@ -108,7 +108,7 @@ Powered by compromise.js for real-time part-of-speech tagging.
 - **ws** (v8.14.2) - WebSocket server for real-time messaging
 - **compromise** (v14.9.0) - Natural language processing for color-coding
 - **HTTP** (native http module, no Express)
-- **Vanilla HTML/CSS/JS** in `branches/ui/` - No frameworks, pure performance
+- **Vanilla HTML/CSS/JS** in `rami/ui/` - No frameworks, pure performance
 
 **Luxify Tree Architecture**: Modular branch-based system with grafts for integration, water for shared schemas, and sap for validation.
 
@@ -214,7 +214,7 @@ Edge Node system #1/
 ├── ARCHITECTURE.md        # Luxify Tree philosophy
 ├── README.md              # This file
 │
-├── branches/              # Core modules
+├── rami/                  # Core modules
 │   ├── server/
 │   │   └── manager.js     # HTTP & WebSocket server
 │   ├── chat/
@@ -256,17 +256,17 @@ This system implements the **Luxify Tree** philosophy to prevent "AI mush" and e
 
 ### Why Tree Structure?
 
-- **Prevents AI mush**: Modular branches prevent cascading rewrites
-- **Clear boundaries**: Each branch has single responsibility
-- **Easy debugging**: Issues are isolated to specific branches
-- **Sustainable growth**: New features = new branches, not modifications
+- **Prevents AI mush**: Modular rami prevent cascading rewrites
+- **Clear boundaries**: Each ramus has single responsibility
+- **Easy debugging**: Issues are isolated to specific rami
+- **Sustainable growth**: New features = new rami, not modifications
 - **Human-readable**: File paths map to conceptual structure
 
 ### Current Implementation
 
-**Branches** are independent modules (server, chat, jobs, ui, nlp)
-**Grafts** connect branches for data flow and integration
-**Water** provides shared data schemas used by all branches
+**Rami** are independent modules (server, chat, jobs, ui, nlp)
+**Grafts** connect rami for data flow and integration
+**Water** provides shared data schemas used by all rami
 **Sap** validates and sanitizes data flowing through the system
 **Orchestrator** (server.js) assembles everything
 
@@ -292,10 +292,10 @@ These features are documented but not yet built:
   - Entity extraction (part numbers, dates, measurements)
   - Auto-tagging of urgent messages
 
-- **Additional branches**:
-  - Analytics branch for reporting
-  - Notification branch for alerts
-  - Export branch for data backup
+- **Additional rami**:
+  - Analytics ramus for reporting
+  - Notification ramus for alerts
+  - Export ramus for data backup
 
 See **ARCHITECTURE.md** for the full Luxify Tree philosophy and growth patterns.
 

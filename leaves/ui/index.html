@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Botta e Risposta</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal">
+        <div class="modal-content">
+            <h2>Enter Your Name</h2>
+            <input type="text" id="username-input" placeholder="Your name..." autocomplete="off" maxlength="20">
+            <button id="login-btn">Join Chat</button>
+        </div>
+    </div>
+
+    <!-- Create Job Modal -->
+    <div id="create-job-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Create New Job</h2>
+            <input type="text" id="job-name-input" placeholder="Job name..." autocomplete="off" maxlength="50">
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button id="create-job-btn" style="flex: 1;">Create</button>
+                <button id="cancel-job-btn" style="flex: 1; background: #2a2a2a; color: #e9edef;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Job Management Modal -->
+    <div id="job-management-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 700px; width: 90%; max-height: 80vh; display: flex; flex-direction: column;">
+            <h2>Job Management</h2>
+            <p style="font-size: 12px; color: #999; margin: -8px 0 12px 0;">Job codes save automatically when you click outside the input field</p>
+            <button id="create-job-btn-modal" style="background: #00bcd4; color: #111; padding: 10px; margin-bottom: 16px; font-weight: 700; border-radius: 6px; cursor: pointer; border: none; font-size: 14px;">+ Create New Job</button>
+            <div style="overflow-y: auto; flex: 1; margin-bottom: 16px;">
+                <table id="jobs-table" style="width: 100%; border-collapse: collapse;">
+                    <thead style="position: sticky; top: 0; background: #1a1a1a; z-index: 1;">
+                        <tr style="background: #2a2a2a; text-align: left;">
+                            <th style="padding: 12px 8px; border-bottom: 2px solid #444; width: 120px;">Job Code</th>
+                            <th style="padding: 12px 8px; border-bottom: 2px solid #444;">Job Name</th>
+                            <th style="padding: 12px 8px; border-bottom: 2px solid #444; width: 200px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="jobs-table-body">
+                        <!-- Jobs will be populated here -->
+                    </tbody>
+                </table>
+            </div>
+            <button id="close-job-management-btn" style="width: 100%; background: #2a2a2a; color: #e9edef;">Close</button>
+        </div>
+    </div>
+
+    <!-- Create Individual Chat Modal -->
+    <div id="create-chat-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>New Individual Chat</h2>
+            <input type="text" id="chat-name-input" placeholder="Chat name (e.g., Order #123)..." autocomplete="off" maxlength="50">
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button id="create-chat-btn" style="flex: 1;">Create</button>
+                <button id="cancel-chat-btn" style="flex: 1; background: #2a2a2a; color: #e9edef;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Question Modal -->
+    <div id="create-problem-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>🔴 New Question</h2>
+            <textarea id="problem-text-input" placeholder="Describe the question..." autocomplete="off" maxlength="500" rows="4" style="width: 100%; resize: vertical; padding: 8px; border-radius: 6px; border: 1px solid #444; background: #1a1a1a; color: #e9edef; font-family: inherit;"></textarea>
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button id="create-problem-btn" style="flex: 1; background: #c62828; color: #fff;">Ask Question</button>
+                <button id="cancel-problem-btn" style="flex: 1; background: #2a2a2a; color: #e9edef;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Answer Modal -->
+    <div id="add-solution-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>✅ Add Answer</h2>
+            <div id="solution-problem-text" style="padding: 12px; background: #1a1a1a; border-radius: 6px; margin-bottom: 12px; color: #8696a0; font-size: 13px;"></div>
+            <textarea id="solution-text-input" placeholder="Describe the answer..." autocomplete="off" maxlength="500" rows="4" style="width: 100%; resize: vertical; padding: 8px; border-radius: 6px; border: 1px solid #444; background: #1a1a1a; color: #e9edef; font-family: inherit;"></textarea>
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button id="add-solution-btn" style="flex: 1; background: #2e7d32; color: #fff;">Add Answer</button>
+                <button id="cancel-solution-btn" style="flex: 1; background: #2a2a2a; color: #e9edef;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Answer Modal -->
+    <div id="solved-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <h2 id="solved-modal-title">Add Answer</h2>
+            <p style="color: #999; margin-bottom: 16px;">Enter the answer details:</p>
+            <textarea id="solved-text-input" placeholder="Describe the answer..." autocomplete="off" maxlength="1000" rows="6" style="width: 100%; resize: vertical; padding: 8px; border-radius: 6px; border: 1px solid #444; background: #1a1a1a; color: #e9edef; font-family: inherit;" autofocus></textarea>
+            <div style="display: flex; gap: 8px; margin-top: 16px;">
+                <button id="submit-solved-btn" style="flex: 1; background: #fbc02d; color: #000; font-weight: 600;">Submit Answer</button>
+                <button id="cancel-solved-btn" style="flex: 1; background: #2a2a2a; color: #e9edef;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat-pad Management Modal -->
+    <div id="chatpad-management-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 600px; max-height: 80vh;">
+            <h2>Chat-pad Management</h2>
+            <div style="overflow-y: auto; max-height: 60vh; margin: 16px 0;">
+                <table id="chatpad-management-table" style="width: 100%; border-collapse: collapse;">
+                    <thead style="position: sticky; top: 0; background: #1a1a1a; z-index: 1;">
+                        <tr>
+                            <th style="padding: 8px; text-align: left; border-bottom: 1px solid #374045; color: #8696a0;">Chat-pad</th>
+                            <th style="padding: 8px; text-align: left; border-bottom: 1px solid #374045; color: #8696a0;">Commenters</th>
+                            <th style="padding: 8px; text-align: left; border-bottom: 1px solid #374045; color: #8696a0;">Questions</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #374045; color: #8696a0;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="chatpad-management-body"></tbody>
+                </table>
+            </div>
+            <button id="close-chatpad-management-btn" style="width: 100%; background: #2a2a2a; color: #e9edef;">Close</button>
+        </div>
+    </div>
+
+    <!-- Reflex Celebration Popup -->
+    <div id="reflex-popup" class="reflex-popup" style="display: none;">
+        <div class="reflex-content">
+            <div class="reflex-stars">✨</div>
+            <h1 class="reflex-title">Reflex Found!</h1>
+            <div class="reflex-stars">✨</div>
+            <p class="reflex-definition">A reflex is not Reactive, it's a planned process to deliver truth through reality-driven results</p>
+            <div class="reflex-details">
+                <div class="reflex-problem"></div>
+                <div class="reflex-solution"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Interface -->
+    <div id="chat-app" style="display: none;">
+        <div id="chat-header">
+            <div class="header-content">
+                <div style="display: flex; flex-direction: column; align-items: flex-start;">
+                    <div style="font-size: 9px; color: #999; margin-bottom: -6px;">Feature millwork</div>
+                    <h1 style="margin: 0;">Botta e Risposta</h1>
+                    <div style="font-size: 10px; color: #aaa; margin-top: -4px;">Question & Answer, a simple dialog</div>
+                </div>
+                <div class="header-right">
+                    <button id="jobs-btn" title="Manage jobs">Jobs</button>
+                    <span id="online-status">● <span id="username-display"></span></span>
+                </div>
+            </div>
+        </div>
+        
+        <div id="job-tabs-container">
+            <div id="job-tabs"></div>
+        </div>
+        
+        <div id="subcategory-bar" style="display: none;">
+            <div id="subcategory-tabs"></div>
+            <div id="job-name-display"></div>
+            <div id="subcategory-actions"></div>
+        </div>
+        
+        <div id="individual-chats-bar" style="display: none;">
+            <div id="individual-chats"></div>
+        </div>
+        
+        <!-- Questions Bar -->
+        <div id="problems-bar" style="display: none;">
+            <div id="problems-list"></div>
+        </div>
+        
+        <div id="messages"></div>
+        
+        <div id="input-container">
+            <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+            <button id="send-btn">
+                <svg viewBox="0 0 24 24" width="24" height="24">
+                    <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+    
+    <script src="https://unpkg.com/compromise@14.9.0/builds/compromise.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

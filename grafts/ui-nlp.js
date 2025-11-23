@@ -3,6 +3,7 @@
  * 
  * Provides NLP processing to client-side UI
  * This graft will be used via API endpoints
+ * NLP processor is now in services/nlp/
  */
 
 class UINLPGraft {
@@ -25,16 +26,16 @@ class UINLPGraft {
   /**
    * Handle NLP API request
    */
-  handleNLPRequest(req, res, serverManager) {
+  handleNLPRequest(req, res, serverFunctions) {
     if (req.url === '/api/nlp/process' && req.method === 'POST') {
-      serverManager.parseBody(req, (err, data) => {
+      serverFunctions.parseBody(req, (err, data) => {
         if (err || !data.text) {
-          serverManager.sendJSON(res, 400, { error: 'Text required' });
+          serverFunctions.sendJSON(res, 400, { error: 'Text required' });
           return;
         }
 
         const result = this.processMessage(data.text);
-        serverManager.sendJSON(res, 200, result);
+        serverFunctions.sendJSON(res, 200, result);
       });
       return true;
     }

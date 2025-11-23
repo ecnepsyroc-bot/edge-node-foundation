@@ -1,225 +1,107 @@
-# Architecture Philosophy: The Luxify Tree
+# Luxify Architecture — Core Specification
 
-## TL;DR
+The Luxify Architecture is a modular system built on five concepts:
 
-The "Tree" terminology isn't bullshit—it's a **control surface for working with AI assistants**. The rules prevent layer-mushing and implicit coupling that AI tools naturally create.
+- **rami** — isolated units of responsibility  
+- **grafts** — explicit bridges between rami  
+- **water** — event and payload definitions  
+- **sap** — protective guardrails  
+- **leaves** — presentation layer  
 
----
-
-## 1. What the Luxify Tree Rules Actually Are
-
-Stripped of metaphor, the spec says:
-
-* `branches/` = separate domains/modules
-* Each branch has an explicit spec (`.branch.md`)
-* No reaching across branches directly; integration happens through `grafts/`
-* "Water" = data/event flow between branches
-* "Sap" = guardrails/validation wrapped *around* existing logic
-* "Leaves" = UI/view/template layer that must not contain core business rules
-* When in doubt, clarify *which branch or graft* we're touching
-
-This is **normal modular design**:
-
-* Branch = bounded context / module
-* Graft = integration layer / anti-corruption layer
-* Water = events / DTOs / pipelines
-* Sap = validation, policies, guardrails
-* Leaves = presentation layer
-
-The only weird thing is the vocabulary—and that's intentional to stop AI from collapsing everything into "one big system".
+These concepts enforce structural integrity and prevent silent coupling.
 
 ---
 
-## 2. Why Metaphors Work Here
+## 1. Rami (`rami/`)
 
-**The critique:** "Metaphors don't clarify; they obscure."
+Rami are the isolated units of the system.
 
-**Reality:** For Cory + multiple AIs + automations + spreadsheets + Pi screens that all need to speak the same "map", a fixed vocabulary is a **control surface**.
-
-Your actual problem: models and tools keep mixing layers ("one massive workspace") instead of respecting boundaries.
-
-For humans-only teams, metaphors can be fluff.  
-For "human + LLM ecosystem", a fixed vocabulary is scaffolding.
-
-**Risk:** Metaphor overload (Roots, Cambium, Bark, Mycelium, etc.).  
-**Guard:** Keep vocabulary small and stable: branches, grafts, water, sap, leaves.
-
----
-
-## 3. Branch Boundaries (Not Dogma)
-
-**The critique:** "Do NOT reference other branches unless GRAFT" is religious.
-
-**Reality:** Your number-one failure mode has been **implicit coupling** and "just grab whatever from wherever."
-
-Hard walls (branches) and explicit crossings (grafts) are *good training wheels*.
-
-**What would be bullshit:**
-* Forbidding yourself from ever refactoring branch boundaries
-* Treating "no direct reference ever" as holy doctrine even when a simple shared util lib would do
-
-**Your actual rule:** Only applies "when editing files inside one branch folder", and allows cross-branch work via named `[GRAFT]`. That's just "don't reach around the API; use the integration layer."
-
-**Guard:** Allow branches/grafts to evolve when domain boundaries clearly shift.
+### Rules
+- A ramus contains its own logic, invariants, and data rules.
+- A ramus does **not** import from any other ramus.
+- Each ramus includes a `.ramus.md` specifying:
+  - responsibilities  
+  - non-responsibilities  
+  - public APIs  
+- Domain truth lives inside each ramus.
+- Rami communicate only via grafts or water-defined events.
 
 ---
 
-## 4. Spec Files (Not Theater)
+## 2. Grafts (`grafts/`)
 
-**The critique:** `.branch.md` and `.graft.md` are documentation theater. Code is the spec.
+Grafts are the only allowed method for connecting rami.
 
-**Reality for your use case:**
-
-You're using:
-* `.branch.md` as the **prompt + contract** for AI tools ("this is what lives here, this is what does *not* live here")
-* `.graft.md` as the integration contract so AI doesn't invent weird calls across branches
-
-These files are:
-* Part doc
-* Part **prompt boundary**
-* Part "do not cross" tape for automation
-
-**What would be bullshit:**
-* Treating them as "authoritative" but never maintaining them
-* Writing 4 pages of vague philosophy instead of 10 lines of concrete contracts
-
-**Guard:** Keep them short, mechanical, and update-first when you change behavior.
+### Rules
+- Every cross-ramus interaction must pass through a graft.
+- Each graft has a `.graft.md` describing:
+  - which rami it connects  
+  - allowed data flows  
+  - mapping or translation rules  
+- Grafts may orchestrate behavior between rami.
+- Grafts do **not** contain domain invariants or domain ownership.
 
 ---
 
-## 5. WATER/SAP/LEAVES Clarity
+## 3. Water (`water/`)
 
-**The critique:** Pulling validation (sap) and events (water) out of the branch violates locality.
+Water defines the flow language of the system.
 
-**Healthy reading:**
-
-* **Branch:** Core rules, invariants, and *internal* validation
-* **Sap:** Cross-cutting protection and guardrails (rate limits, input sanitation between branches, error handling around I/O)
-* **Water:** How branches talk to each other (events, messages, feeds), not their internal business rules
-* **Leaves:** Presentation layer—reads from modules but defines no business rules
-
-**What would be bullshit:**
-* "All validation must live in sap/" instead of "Core invariants live with the domain; cross-cutting protection is sap"
+### Rules
+- Water files specify event names and payload shapes.
+- Water is declarative only:
+  - no business logic  
+  - no orchestration  
+- Events are versioned when payloads change.
+- Producers and consumers are documented per event.
 
 ---
 
-## 6. Enforcement Mechanism
+## 4. Sap (`sap/`)
 
-**The critique:** "It's just honor-system architecture; it will collapse."
+Sap is the protective outer layer for the architecture.
 
-**Reality:** Your **primary enforcer is the LLM**.
-
-The front-matter block (`description`, `globs`, `alwaysApply`) is for tools like Cursor / Copilot / Claude Projects / repo-wide policies.
-
-Those tools use this metadata to decide:
-* Which guidelines to apply where
-* Which files are in which branch
-* What they're allowed to import
-
-**Enforcement exists:**
-→ "When the AI is in `branches/foo/**`, it must obey the Branch rules."
-
-You can add *more* enforcement (linters, tests, CI checks), but there IS a mechanism.
+### Rules
+- Sap performs:
+  - input sanitation  
+  - boundary validation  
+  - rate limiting  
+  - error handling  
+  - logging  
+- Sap wraps calls but does not redefine domain rules.
+- Sap may block or correct malformed flows.
 
 ---
 
-## 7. Real Warnings to Heed
+## 5. Leaves (`leaves/`)
 
-1. **Metaphors can get out of hand**
-   Keep the vocabulary small and stable: branches, grafts, water, sap, leaves. That's enough.
+Leaves represent UI and presentation.
 
-2. **Branch boundaries must be allowed to change**
-   If you realize "these two branches are actually one domain", merge them and update the specs.
-
-3. **Docs can rot**
-   `.branch.md` and `.graft.md` must be:
-   * Short
-   * Factual
-   * Updated **before/along with** code changes
-
-4. **Grafts can turn into god-objects**
-   If a graft starts doing heavy business logic that rightfully belongs inside a branch, that's a smell.
+### Rules
+- Leaves render state and capture intent.
+- Leaves contain no domain or integration logic.
+- Leaves do not import rami directly.
+- Leaves interact through grafts or a thin external API.
 
 ---
 
-## 8. De-Theatered Version (If Needed)
+## 6. System Behavior Guidelines
 
-Same thing, no poetry:
-
-### **Modules (`branches/`)**
-* Each top-level folder is a domain module
-* Each module has a `.branch.md` that:
-  * Defines purpose and responsibilities
-  * Lists public entry points / contracts
-  * States what it explicitly *does not* handle
-
-### **Integrations (`grafts/`)**
-* Each folder is an integration between specific modules
-* Each has a `.graft.md` describing:
-  * Which modules it touches
-  * What data/events it passes back and forth
-  * Any mapping/translation rules
-
-### **Flows (WATER)**
-* When defining flows, only connect the modules named by the user
-* Don't move responsibilities; just define the communication
-
-### **Guardrails (SAP)**
-* Add validation and safety at boundaries
-* Don't rewrite the core business rules; wrap them
-
-### **Presentation (LEAVES)**
-* UI/templates/dashboards/panels
-* They can read from modules but may not define new business rules
-
-This is fully legit architecture. The "Tree" naming is just skin.
+- Isolation is strict: rami never communicate except through grafts or water.
+- Responsibilities are explicit: every ramus and graft documents its purpose.
+- Data flow is transparent: all flows are declared in water.
+- Boundaries are protected: sap guards every edge.
+- Presentation is separate: leaves are purely representational.
 
 ---
 
-## 9. What's Actually Bullshit vs. What's Not
+## 7. Evolution Rules
 
-### **NOT bullshit:**
-* Using branches/grafts to keep AI and humans from mixing concerns
-* Using `.branch.md` / `.graft.md` as promptable contracts
-* Forbidding random cross-branch imports from inside a branch
-* Separating domain logic, integration flows, and UI
-
-### **Actual bullshit to avoid:**
-* Turning the metaphor into doctrine ("never refactor branches", "all validation must be sap")
-* Letting specs rot while still calling them "authoritative"
-* Over-ceremonial GRAFTs for trivial utilities that should just be a shared library
+- If a ramus grows beyond its scope, split it.
+- If a graft becomes overloaded, divide it.
+- If a ramus begins accumulating UI needs, create or extend leaves.
+- Specification files (`.ramus.md`, `.graft.md`) are updated alongside code changes.
 
 ---
 
-## 10. The Real Point
-
-If you treat the Tree as a **pragmatic safety harness for your brain + AI**, not as a religion, it's not architecture theater at all.
-
-It's you building a language that keeps your system from dissolving into the mush that every assistant wants to create.
-
----
-
-## Current Project Implementation
-
-This shop communication tool is currently a **monolithic proof-of-concept**. To apply Tree principles:
-
-### Candidate Branches:
-* `branches/jobs/` - Job management (create, list, switch, store metadata)
-* `branches/messaging/` - Real-time chat (WebSocket, message storage, delivery)
-* `branches/factory-orders/` - Factory Order subcategory + individual chats
-* `branches/problems/` - Problem tracking ("Seeking solution" messages)
-
-### Candidate Grafts:
-* `grafts/job-messaging/` - How jobs display their messages
-* `grafts/factory-messaging/` - How Factory Orders route to individual chats
-* `grafts/problem-messaging/` - How problems appear in General view
-
-### Current State:
-* All logic in single `server.js` and `app.js`
-* Natural evolution: extract as patterns become clear
-* **Don't force extraction prematurely**—wait for pain points
-
-### Guard Rails:
-* When adding features, ask: "Which branch does this belong to?"
-* If answer is unclear, it might need a new branch or belongs in a graft
-* Update this doc when boundaries crystallize
+This is the complete and minimal Luxify Architecture.
