@@ -512,12 +512,12 @@ body {
     transform: scale(0.95);
 }
 
-/* Answer button with yellow dashed border */
+/* Answer button with blue dashed border - same as Manage/+chat badges */
 #answer-btn {
     flex-shrink: 0;
     background: transparent;
-    color: #fbc02d;
-    border: 1px dashed #fbc02d;
+    color: #00bcd4;
+    border: 2px dashed #00bcd4;
     padding: 5px 8px;
     font-size: 10px;
     font-weight: 700;
@@ -529,8 +529,8 @@ body {
 }
 
 #answer-btn:hover:not(:disabled) {
-    background: #fbc02d;
-    color: #000;
+    background: #00bcd4;
+    color: #111;
     border-style: solid;
 }
 
@@ -588,15 +588,30 @@ body {
     border-top-right-radius: 2px;
 }
 
-/* Question/Problem messages - same green as regular messages with dashed red border */
+/* Question/Problem messages - same green as Chat-pads badge with dashed red border */
 .message-sent .message-bubble.question-bubble {
-    background: #005c4b !important;
+    background: #25d366 !important;
     border: 2px dashed #c62828 !important;
+    color: #000 !important;
 }
 
 .message-received .message-bubble.question-bubble {
-    background: #1f1f1f !important;
+    background: #25d366 !important;
     border: 2px dashed #c62828 !important;
+    color: #000 !important;
+}
+
+.message-bubble.question-bubble .message-content {
+    color: #000 !important;
+}
+
+.message-bubble.question-bubble .message-content * {
+    color: #000 !important;
+}
+
+.message-bubble.question-bubble .message-time {
+    color: #000 !important;
+    opacity: 0.7;
 }
 
 .message-username {

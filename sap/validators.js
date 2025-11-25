@@ -5,16 +5,17 @@
  * Prevents malformed data from corrupting the tree.
  */
 
-const { schemas } = require('../rami/chat/schemas');
+// const { schemas } = require('../rami/chat/schemas');
 
 /**
  * Sanitize text input
  */
 function sanitizeText(text) {
   if (typeof text !== 'string') return '';
-  
+
   // Remove control characters except newlines/tabs
   return text
+    // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
     .trim()
     .slice(0, 5000); // Max 5000 chars
@@ -25,7 +26,7 @@ function sanitizeText(text) {
  */
 function validateUsername(username) {
   if (typeof username !== 'string') return false;
-  
+
   const sanitized = sanitizeText(username);
   return sanitized.length > 0 && sanitized.length <= 50;
 }
@@ -35,7 +36,7 @@ function validateUsername(username) {
  */
 function validateMessage(msg) {
   if (!msg || typeof msg !== 'object') return false;
-  
+
   return (
     typeof msg.id === 'string' &&
     validateUsername(msg.user) &&
@@ -53,7 +54,7 @@ function validateMessage(msg) {
  */
 function validateJobName(job) {
   if (typeof job !== 'string') return false;
-  
+
   const sanitized = sanitizeText(job);
   return sanitized.length > 0 && sanitized.length <= 100;
 }
@@ -63,7 +64,7 @@ function validateJobName(job) {
  */
 function validateSubcategory(subcategory) {
   if (typeof subcategory !== 'string') return false;
-  
+
   const sanitized = sanitizeText(subcategory);
   return sanitized.length > 0 && sanitized.length <= 100;
 }
@@ -73,7 +74,7 @@ function validateSubcategory(subcategory) {
  */
 function validateChatName(chatName) {
   if (typeof chatName !== 'string') return false;
-  
+
   const sanitized = sanitizeText(chatName);
   return sanitized.length > 0 && sanitized.length <= 100;
 }
@@ -83,7 +84,7 @@ function validateChatName(chatName) {
  */
 function validateJobSubcategory(obj) {
   if (!obj || typeof obj !== 'object') return false;
-  
+
   return (
     validateJobName(obj.job) &&
     validateSubcategory(obj.subcategory)
@@ -95,7 +96,7 @@ function validateJobSubcategory(obj) {
  */
 function validateIndividualChat(obj) {
   if (!obj || typeof obj !== 'object') return false;
-  
+
   return (
     validateJobName(obj.job) &&
     validateSubcategory(obj.subcategory) &&
@@ -108,7 +109,7 @@ function validateIndividualChat(obj) {
  */
 function validateDatabase(db) {
   if (!db || typeof db !== 'object') return false;
-  
+
   return (
     typeof db.users === 'object' &&
     Array.isArray(db.messages) &&

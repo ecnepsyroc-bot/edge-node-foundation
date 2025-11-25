@@ -4,7 +4,8 @@
   "description": "Simple shop communication tool with color-highlighted text",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "lint": "eslint ."
   },
   "dependencies": {
     "compromise": "^14.9.0",
@@ -18,5 +19,8 @@
     "communication"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "eslint": "^8.57.1"
+  }
 }

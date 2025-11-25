@@ -19,7 +19,7 @@ class ChatManager {
    */
   async addMessage(msgData) {
     const message = sanitizeMessage(msgData);
-    
+
     // Get or create user
     const userResult = await this.pool.query(
       'INSERT INTO users (username) VALUES ($1) ON CONFLICT (username) DO UPDATE SET last_seen = NOW() RETURNING id',
@@ -58,7 +58,7 @@ class ChatManager {
       // Extract chat name from individualChat format "jobName_chatName"
       const parts = message.individualChat.split('_');
       const chatName = parts.slice(1).join('_');
-      
+
       if (chatName && subcategoryId) {
         const chatResult = await this.pool.query(
           'SELECT id FROM individual_chats WHERE job_id = $1 AND subcategory_id = $2 AND chat_name = $3',
@@ -120,7 +120,7 @@ class ChatManager {
       LEFT JOIN users solved_by ON m.solved_by_user_id = solved_by.id
       WHERE 1=1
     `;
-    
+
     const params = [];
     let paramCount = 1;
 
@@ -166,7 +166,7 @@ class ChatManager {
   async deleteMessagesByUser(username, job, subcategory, individualChat) {
     const targetChat = individualChat === undefined ? null : individualChat;
     let chatName = null;
-    
+
     if (targetChat) {
       const parts = targetChat.split('_');
       chatName = parts.slice(1).join('_');
@@ -193,7 +193,31 @@ class ChatManager {
   /**
    * Delete a single message by ID
    */
-  async deleteMessageById(messageId) {
+  /**
+   * Delete a single message by ID (restricted to author)
+   */
+  async deleteMessageById(messageId, username) {
+    // Check if message exists and get author
+    const checkResult = await this.pool.query(
+      `SELECT m.id, u.username 
+       FROM messages m 
+       JOIN users u ON m.user_id = u.id 
+       WHERE m.id = $1`,
+      [parseInt(messageId)]
+    );
+
+    if (checkResult.rows.length === 0) {
+      throw new Error('Message not found');
+    }
+
+    const message = checkResult.rows[0];
+
+    // Check permission (must be author)
+    // TODO: Add admin check if admin system is implemented
+    if (message.username !== username) {
+      throw new Error('Unauthorized');
+    }
+
     const result = await this.pool.query(
       'DELETE FROM messages WHERE id = $1',
       [parseInt(messageId)]
@@ -207,7 +231,7 @@ class ChatManager {
   async clearAllMessages(job, subcategory, individualChat) {
     const targetChat = individualChat === undefined ? null : individualChat;
     let chatName = null;
-    
+
     if (targetChat) {
       const parts = targetChat.split('_');
       chatName = parts.slice(1).join('_');
@@ -216,17 +240,21 @@ class ChatManager {
     const result = await this.pool.query(
       `WITH job_lookup AS (
          SELECT id FROM jobs WHERE name = $1
+       ),
+       subcat_lookup AS (
+         SELECT id FROM subcategories 
+         WHERE job_id = (SELECT id FROM job_lookup) AND name = $2
+       ),
+       chat_lookup AS (
+         SELECT id FROM individual_chats 
+         WHERE job_id = (SELECT id FROM job_lookup) 
+           AND subcategory_id = (SELECT id FROM subcat_lookup)
+           AND chat_name = $3
        )
        DELETE FROM messages 
        WHERE job_id = (SELECT id FROM job_lookup)
-         AND (subcategory_id = (
-           SELECT id FROM subcategories 
-           WHERE job_id = (SELECT id FROM job_lookup) AND name = $2
-         ) OR ($2 IS NULL AND subcategory_id IS NULL))
-         AND (individual_chat_id = (
-           SELECT id FROM individual_chats 
-           WHERE job_id = (SELECT id FROM job_lookup) AND chat_name = $3
-         ) OR ($3 IS NULL AND individual_chat_id IS NULL))
+         AND (subcategory_id = (SELECT id FROM subcat_lookup) OR ($2 IS NULL AND subcategory_id IS NULL))
+         AND (individual_chat_id = (SELECT id FROM chat_lookup) OR ($3 IS NULL AND individual_chat_id IS NULL))
          AND is_problem = FALSE`,
       [job, subcategory, chatName]
     );
@@ -243,7 +271,7 @@ class ChatManager {
       'SELECT id FROM users WHERE username = $1',
       [username]
     );
-    
+
     if (userResult.rows.length === 0) {
       throw new Error('User not found');
     }
@@ -273,13 +301,13 @@ class ChatManager {
    */
   async addJobSubcategory(job, subcategory) {
     const data = sanitizeJobSubcategory({ job, subcategory });
-    
+
     // Get or create job
     const jobResult = await this.pool.query(
       'INSERT INTO jobs (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING id',
       [data.job]
     );
-    
+
     let jobId;
     if (jobResult.rows.length > 0) {
       jobId = jobResult.rows[0].id;
@@ -349,7 +377,7 @@ class ChatManager {
    */
   async addIndividualChat(job, subcategory, chatName) {
     const data = sanitizeIndividualChat({ job, subcategory, chatName });
-    
+
     // Get job ID
     const jobResult = await this.pool.query('SELECT id FROM jobs WHERE name = $1', [data.job]);
     if (jobResult.rows.length === 0) {
@@ -453,14 +481,14 @@ class ChatManager {
    */
   async getUsers() {
     const result = await this.pool.query('SELECT username, last_seen FROM users');
-    
+
     const users = {};
     result.rows.forEach(row => {
       users[row.username] = {
         lastSeen: row.last_seen
       };
     });
-    
+
     return users;
   }
 
@@ -491,12 +519,12 @@ class ChatManager {
    */
   async getAllJobCodes() {
     const result = await this.pool.query('SELECT name, code FROM jobs WHERE code IS NOT NULL');
-    
+
     const codes = {};
     result.rows.forEach(row => {
       codes[row.name] = row.code;
     });
-    
+
     return codes;
   }
 
@@ -527,12 +555,12 @@ class ChatManager {
    */
   async getAllJobArchived() {
     const result = await this.pool.query('SELECT name, archived FROM jobs WHERE archived = TRUE');
-    
+
     const archived = {};
     result.rows.forEach(row => {
       archived[row.name] = row.archived;
     });
-    
+
     return archived;
   }
 
@@ -547,7 +575,7 @@ class ChatManager {
        WHERE j.name = $1`,
       [jobName]
     );
-    
+
     const deletedMessages = parseInt(countResult.rows[0].count);
 
     // Delete job (CASCADE will handle everything)
@@ -600,25 +628,110 @@ class ChatManager {
     // Return updated message
     const messages = await this.getMessages({});
     const message = messages.find(m => m.id === messageId.toString());
-    
+
     return { message };
   }
 
   /**
    * Get stored job names list (PostgreSQL doesn't store this, returns null)
    */
-  async getJobNames() {
-    // In PostgreSQL, we don't store a separate job names list
-    // Jobs are managed through the jobs table
-    return null;
+  /**
+   * Add message to Playbook
+   */
+  async addToPlaybook(messageId, notes, username) {
+    const result = await this.pool.query(
+      `UPDATE messages 
+       SET in_playbook = TRUE, 
+           playbook_notes = $2, 
+           playbook_verified_by = $3, 
+           playbook_verified_at = NOW() 
+       WHERE id = $1 
+       RETURNING *`,
+      [messageId, notes, username]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('Message not found');
+    }
+
+    return this.normalizeMessage(result.rows[0]);
   }
 
   /**
-   * Set job names list (no-op in PostgreSQL)
+   * Get all Playbook entries
+   */
+  async getPlaybookEntries() {
+    const result = await this.pool.query(
+      `SELECT m.*, j.name as job_name, ic.chat_name as individual_chat_name
+       FROM messages m
+       LEFT JOIN jobs j ON m.job_id = j.id
+       LEFT JOIN individual_chats ic ON m.individual_chat_id = ic.id
+       WHERE m.in_playbook = TRUE
+       ORDER BY m.playbook_verified_at DESC`
+    );
+
+    return result.rows.map(row => this.normalizeMessage(row));
+  }
+
+  /**
+   * Normalize message from database row to frontend format
+   */
+  normalizeMessage(row) {
+    return {
+      id: row.id ? row.id.toString() : null,
+      username: row.username || row.user || 'Unknown',
+      text: row.text || '',
+      job_id: row.job_id,
+      job_name: row.job_name || null,
+      subcategory: row.subcategory || null,
+      individual_chat_id: row.individual_chat_id,
+      individual_chat_name: row.individual_chat_name || null,
+      timestamp: row.timestamp || new Date().toISOString(),
+      isProblem: row.is_problem || false,
+      isSolved: row.is_solved || false,
+      solution: row.solution || '',
+      solvedBy: row.solvedby || row.solved_by || '',
+      solvedAt: row.solvedat || row.solved_at || null,
+      inPlaybook: row.in_playbook || false,
+      playbookNotes: row.playbook_notes || '',
+      playbookVerifiedBy: row.playbook_verified_by || '',
+      playbookVerifiedAt: row.playbook_verified_at || null
+    };
+  }
+
+  /**
+   * Get stored job names list
+   */
+  async getJobNames() {
+    const result = await this.pool.query('SELECT name FROM jobs');
+    return result.rows.map(row => row.name);
+  }
+
+  /**
+   * Set job names list (sync with database)
    */
   async setJobNames(jobNames) {
-    // No-op in PostgreSQL - jobs are managed in jobs table
-    return true;
+    // We use a transaction to ensure consistency
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const jobName of jobNames) {
+        // Insert job if it doesn't exist
+        await client.query(
+          'INSERT INTO jobs (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
+          [jobName]
+        );
+      }
+
+      await client.query('COMMIT');
+      return true;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
   }
 }
 

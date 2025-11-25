@@ -75,6 +75,43 @@ class ServerChatGraft {
       return true;
     }
 
+    // Delete single message (REST style)
+    const deleteMatch = req.url.match(new RegExp('^/api/messages/([^/?]+)'));
+    if (deleteMatch && req.method === 'DELETE') {
+      const messageId = deleteMatch[1];
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const username = (url.searchParams.get('username') || '').trim();
+
+      if (!username) {
+        this.server.sendJSON(res, 400, { error: 'Username required' });
+        return true;
+      }
+
+      try {
+        const success = await this.chat.deleteMessageById(messageId, username);
+        if (success) {
+          this.server.sendJSON(res, 204, null);
+          this.server.broadcast({
+            type: 'message_deleted',
+            message_id: messageId,
+            timestamp: new Date().toISOString()
+          });
+        } else {
+          // Should have thrown if not found/unauthorized, but just in case
+          this.server.sendJSON(res, 404, { error: 'Message not found' });
+        }
+      } catch (error) {
+        if (error.message === 'Unauthorized') {
+          this.server.sendJSON(res, 403, { error: 'Unauthorized' });
+        } else if (error.message === 'Message not found') {
+          this.server.sendJSON(res, 404, { error: 'Message not found' });
+        } else {
+          this.server.sendJSON(res, 500, { error: error.message });
+        }
+      }
+      return true;
+    }
+
     if (req.url.startsWith('/api/messages') && req.method === 'DELETE') {
       const url = new URL(req.url, `http://${req.headers.host}`);
       const messageId = url.searchParams.get('message_id');
@@ -85,15 +122,25 @@ class ServerChatGraft {
 
       // Single message deletion by ID
       if (messageId) {
-        const success = await this.chat.deleteMessageById(messageId);
-        this.server.sendJSON(res, 200, { success });
+        try {
+          const success = await this.chat.deleteMessageById(messageId, username);
+          this.server.sendJSON(res, 200, { success });
 
-        if (success) {
-          this.server.broadcast({
-            type: 'message_deleted',
-            message_id: messageId,
-            timestamp: new Date().toISOString()
-          });
+          if (success) {
+            this.server.broadcast({
+              type: 'message_deleted',
+              message_id: messageId,
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (error) {
+          if (error.message === 'Unauthorized') {
+            this.server.sendJSON(res, 403, { error: 'Unauthorized' });
+          } else if (error.message === 'Message not found') {
+            this.server.sendJSON(res, 404, { error: 'Message not found' });
+          } else {
+            this.server.sendJSON(res, 400, { error: error.message });
+          }
         }
         return true;
       }
@@ -126,19 +173,19 @@ class ServerChatGraft {
     }
 
     // Solve a problem message
-    if (req.url.match(/^\/api\/messages\/[^\/]+\/solve$/) && req.method === 'PATCH') {
+    if (req.url.match(new RegExp('^/api/messages/[^/]+/solve$')) && req.method === 'PATCH') {
       const messageId = req.url.split('/')[3];
-      
+
       this.server.parseBody(req, async (err, data) => {
         if (err || !data.solution || !data.username) {
           this.server.sendJSON(res, 400, { error: 'Solution and username required' });
           return;
         }
-        
+
         try {
           const message = await this.chat.solveMessage(messageId, data.solution, data.username);
           this.server.sendJSON(res, 200, { success: true, message });
-          
+
           // Broadcast to all clients
           this.server.broadcast({
             type: 'problem_solved',
@@ -152,7 +199,49 @@ class ServerChatGraft {
           this.server.sendJSON(res, 400, { error: error.message });
         }
       });
-      
+
+      return true;
+    }
+
+    // Add to Playbook endpoint
+    if (req.url.match(new RegExp('^/api/messages/[^/]+/playbook$')) && req.method === 'PATCH') {
+      const messageId = req.url.split('/')[3];
+
+      this.server.parseBody(req, async (err, data) => {
+        if (err || !data.notes || !data.username) {
+          this.server.sendJSON(res, 400, { error: 'Notes and username required' });
+          return;
+        }
+
+        try {
+          const message = await this.chat.addToPlaybook(messageId, data.notes, data.username);
+          this.server.sendJSON(res, 200, { success: true, message });
+
+          // Broadcast to all clients
+          this.server.broadcast({
+            type: 'playbook_entry_added',
+            message_id: messageId,
+            notes: data.notes,
+            verified_by: data.username,
+            verified_at: message.playbookVerifiedAt,
+            timestamp: new Date().toISOString()
+          });
+        } catch (error) {
+          this.server.sendJSON(res, 400, { error: error.message });
+        }
+      });
+
+      return true;
+    }
+
+    // Get Playbook endpoint
+    if (req.url === '/api/playbook' && req.method === 'GET') {
+      try {
+        const entries = await this.chat.getPlaybookEntries();
+        this.server.sendJSON(res, 200, { entries });
+      } catch (error) {
+        this.server.sendJSON(res, 400, { error: error.message });
+      }
       return true;
     }
 

@@ -140,6 +140,22 @@ function getNetworkIP() {
 }
 
 /**
+ * Get Tailscale IP address (100.x.x.x range)
+ */
+function getTailscaleIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      // Tailscale IPs are in the 100.64.0.0/10 range (CGNAT)
+      if (iface.family === 'IPv4' && iface.address.startsWith('100.')) {
+        return iface.address;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * HTTP Request Handler (assembled from grafts)
  */
 async function handleHTTPRequest(req, res) {
@@ -171,7 +187,7 @@ async function handleHTTPRequest(req, res) {
       try {
         const jobName = jobsManager.addJob(data.jobName.trim());
         sendJSON(res, 200, { success: true, jobName });
-        
+
         // Broadcast to all clients
         broadcast({
           type: 'job_created',
@@ -185,7 +201,7 @@ async function handleHTTPRequest(req, res) {
   }
 
   // Update job code endpoint
-  if (req.url.match(/^\/api\/jobs\/[^\/]+\/code$/) && req.method === 'PATCH') {
+  if (req.url.match(new RegExp('^/api/jobs/[^/]+/code$')) && req.method === 'PATCH') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
     parseBody(req, async (err, data) => {
       if (err) {
@@ -203,7 +219,7 @@ async function handleHTTPRequest(req, res) {
   }
 
   // Job subcategories endpoint
-  if (req.url.match(/^\/api\/jobs\/[^\/]+\/subcategories$/) && req.method === 'GET') {
+  if (req.url.match(new RegExp('^/api/jobs/[^/]+/subcategories$')) && req.method === 'GET') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
     const subcategories = await chatManager.getJobSubcategories(jobName);
     const hasChatPads = subcategories.some(s => s.subcategory === 'Chat-pads');
@@ -212,7 +228,7 @@ async function handleHTTPRequest(req, res) {
   }
 
   // Create subcategory endpoint
-  if (req.url.match(/^\/api\/jobs\/[^\/]+\/subcategories$/) && req.method === 'POST') {
+  if (req.url.match(new RegExp('^/api/jobs/[^/]+/subcategories$')) && req.method === 'POST') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
     parseBody(req, async (err, data) => {
       if (err || !data.subcategory) {
@@ -222,7 +238,7 @@ async function handleHTTPRequest(req, res) {
       try {
         await chatJobsGraft.createSubcategory(jobName, data.subcategory);
         sendJSON(res, 200, { success: true });
-        
+
         // Broadcast to all clients
         broadcast({
           type: 'subcategory_created',
@@ -237,29 +253,29 @@ async function handleHTTPRequest(req, res) {
   }
 
   // Delete subcategory endpoint (Chat-pad)
-  if (req.url.match(/^\/api\/jobs\/[^\/]+\/subcategories$/) && req.method === 'DELETE') {
+  if (req.url.match(new RegExp('^/api/jobs/[^/]+/subcategories$')) && req.method === 'DELETE') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
-    
+
     // Delete Chat-pads subcategory and all related data
     const deleted = await chatManager.deleteJobSubcategory(jobName, 'Chat-pads');
-    
-    sendJSON(res, 200, { 
-      success: true, 
-      deletedMessages: deleted 
+
+    sendJSON(res, 200, {
+      success: true,
+      deletedMessages: deleted
     });
-    
+
     // Broadcast to all clients
     broadcast({
       type: 'factory_order_deleted',
       jobId: jobName,
       subcategory: 'Chat-pads'
     });
-    
+
     return;
   }
 
   // Update job code endpoint
-  if (req.url.match(/^\/api\/jobs\/[^\/]+\/code$/) && req.method === 'PATCH') {
+  if (req.url.match(new RegExp('^/api/jobs/[^/]+/code$')) && req.method === 'PATCH') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
     parseBody(req, async (err, data) => {
       if (err) {
@@ -277,7 +293,7 @@ async function handleHTTPRequest(req, res) {
   }
 
   // Rename job endpoint
-  if (req.url.match(/^\/api\/jobs\/[^\/]+\/rename$/) && req.method === 'PATCH') {
+  if (req.url.match(new RegExp('^/api/jobs/[^/]+/rename$')) && req.method === 'PATCH') {
     const oldName = decodeURIComponent(req.url.split('/')[3]);
     parseBody(req, async (err, data) => {
       if (err || !data.newName) {
@@ -287,7 +303,7 @@ async function handleHTTPRequest(req, res) {
       try {
         const result = await chatJobsGraft.renameJob(oldName, data.newName);
         sendJSON(res, 200, { success: true, ...result });
-        
+
         // Broadcast to all clients
         broadcast({
           type: 'job_renamed',
@@ -302,7 +318,7 @@ async function handleHTTPRequest(req, res) {
   }
 
   // Archive/Unarchive job endpoint
-  if (req.url.match(/^\/api\/jobs\/[^\/]+\/archive$/) && req.method === 'PATCH') {
+  if (req.url.match(new RegExp('^/api/jobs/[^/]+/archive$')) && req.method === 'PATCH') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
     parseBody(req, async (err, data) => {
       if (err || data.archived === undefined) {
@@ -312,7 +328,7 @@ async function handleHTTPRequest(req, res) {
       try {
         const result = await chatJobsGraft.archiveJob(jobName, data.archived);
         sendJSON(res, 200, { success: true, ...result });
-        
+
         // Broadcast to all clients
         broadcast({
           type: 'job_archived',
@@ -327,7 +343,7 @@ async function handleHTTPRequest(req, res) {
   }
 
   // Update message chat-pad assignment endpoint
-  if (req.url.match(/^\/api\/messages\/[^\/]+\/chatpad$/) && req.method === 'PATCH') {
+  if (req.url.match(new RegExp('^/api/messages/[^/]+/chatpad$')) && req.method === 'PATCH') {
     const messageId = decodeURIComponent(req.url.split('/')[3]);
     parseBody(req, async (err, data) => {
       if (err || !data.individualChatId) {
@@ -337,7 +353,7 @@ async function handleHTTPRequest(req, res) {
       try {
         const result = await chatManager.updateMessageChatpad(messageId, data.individualChatId);
         sendJSON(res, 200, { success: true, ...result });
-        
+
         // Broadcast to all clients
         broadcast({
           type: 'message_chatpad_updated',
@@ -353,13 +369,13 @@ async function handleHTTPRequest(req, res) {
   }
 
   // Delete job endpoint
-  if (req.url.match(/^\/api\/jobs\/[^\/]+$/) && req.method === 'DELETE') {
+  if (req.url.match(new RegExp('^/api/jobs/[^/]+$')) && req.method === 'DELETE') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
-    
+
     try {
       const result = await chatJobsGraft.deleteJob(jobName);
       sendJSON(res, 200, { success: true, ...result });
-      
+
       // Broadcast to all clients
       broadcast({
         type: 'job_deleted',
@@ -372,7 +388,7 @@ async function handleHTTPRequest(req, res) {
   }
 
   // Create individual chat endpoint
-  if (req.url.match(/^\/api\/jobs\/[^\/]+\/chats$/) && req.method === 'POST') {
+  if (req.url.match(new RegExp('^/api/jobs/[^/]+/chats$')) && req.method === 'POST') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
     console.log('Create chat request - Job:', jobName);
     parseBody(req, async (err, data) => {
@@ -384,7 +400,7 @@ async function handleHTTPRequest(req, res) {
         console.log('Creating chat:', data.chatName, 'for job:', jobName);
         const createdChat = await chatJobsGraft.createIndividualChat(jobName, 'Chat-pads', data.chatName);
         sendJSON(res, 200, { success: true, chatId: createdChat.id });
-        
+
         // Broadcast to all clients with chat ID and username
         broadcast({
           type: 'individual_chat_created',
@@ -402,11 +418,11 @@ async function handleHTTPRequest(req, res) {
   }
 
   // Get individual chats endpoint
-  if (req.url.match(/^\/api\/jobs\/[^\/]+\/chats$/) && req.method === 'GET') {
+  if (req.url.match(new RegExp('^/api/jobs/[^/]+/chats$')) && req.method === 'GET') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
     const chats = await chatManager.getIndividualChats(jobName, 'Chat-pads');
     // Convert to format client expects
-    const formatted = chats.map((c, idx) => ({
+    const formatted = chats.map((c, _idx) => ({
       id: `${jobName}_${c.chatName}`,
       name: c.chatName
     }));
@@ -415,20 +431,20 @@ async function handleHTTPRequest(req, res) {
   }
 
   // Delete individual chat endpoint
-  if (req.url.match(/^\/api\/jobs\/[^\/]+\/chats\/[^\/]+$/) && req.method === 'DELETE') {
+  if (req.url.match(new RegExp('^/api/jobs/[^/]+/chats/[^/]+$')) && req.method === 'DELETE') {
     const jobName = decodeURIComponent(req.url.split('/')[3]);
     const chatId = decodeURIComponent(req.url.split('/')[5]);
-    
+
     // Extract chat name from chat ID (format: "jobName_chatName")
     const chatName = chatId.split('_').slice(1).join('_');
-    
+
     const deleted = await chatManager.deleteIndividualChat(jobName, 'Chat-pads', chatName);
-    
-    sendJSON(res, 200, { 
-      success: true, 
-      deletedMessages: deleted 
+
+    sendJSON(res, 200, {
+      success: true,
+      deletedMessages: deleted
     });
-    
+
     // Broadcast to all clients
     broadcast({
       type: 'individual_chat_deleted',
@@ -436,7 +452,7 @@ async function handleHTTPRequest(req, res) {
       chatId: chatId,
       chatName: chatName
     });
-    
+
     return;
   }
 
@@ -491,14 +507,20 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Start listening
-server.listen(PORT, () => {
+// Start listening on all network interfaces for Tailscale access
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  
+
   // Get local network IP
   const networkIP = getNetworkIP();
   if (networkIP) {
     console.log(`Network access: http://${networkIP}:${PORT}`);
+  }
+
+  // Get Tailscale IP if available
+  const tailscaleIP = getTailscaleIP();
+  if (tailscaleIP) {
+    console.log(`🔒 Tailscale access: http://${tailscaleIP}:${PORT}`);
   }
 });
 
@@ -511,10 +533,16 @@ console.log('└── Sap: Validation active');
 
 // Global error handlers
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('⚠️ Unhandled Rejection at:', promise, 'reason:', reason);
+  // Log but don't crash - let the application continue
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  process.exit(1);
+  console.error('⚠️ Uncaught Exception:', error);
+  // Log but don't crash unless it's critical
+  // Only exit on truly fatal errors
+  if (error.code === 'EADDRINUSE' || error.code === 'EACCES') {
+    console.error('Fatal error - shutting down');
+    process.exit(1);
+  }
 });

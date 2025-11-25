@@ -23,7 +23,7 @@ class ChatManager {
       await client.query('BEGIN');
       
       // Get or create user
-      let userResult = await client.query(
+      const userResult = await client.query(
         'SELECT id FROM users WHERE username = $1',
         [message.username]
       );
@@ -45,7 +45,7 @@ class ChatManager {
       }
       
       // Get or create job
-      let jobResult = await client.query(
+      const jobResult = await client.query(
         'SELECT id FROM jobs WHERE name = $1',
         [message.job]
       );
@@ -147,7 +147,7 @@ class ChatManager {
     
     if (filters.individualChat !== undefined) {
       if (filters.individualChat === null) {
-        query += ` AND m.individual_chat_id IS NULL`;
+        query += ' AND m.individual_chat_id IS NULL';
       } else {
         const chatName = filters.individualChat.replace(`${filters.job}_`, '');
         params.push(chatName);
@@ -160,7 +160,7 @@ class ChatManager {
       query += ` AND m.is_problem = $${params.length}`;
     }
     
-    query += ` ORDER BY m.timestamp ASC`;
+    query += ' ORDER BY m.timestamp ASC';
     
     const result = await this.pool.query(query, params);
     
@@ -207,7 +207,7 @@ class ChatManager {
       
       if (individualChat !== undefined) {
         if (individualChat === null) {
-          query += ` AND individual_chat_id IS NULL`;
+          query += ' AND individual_chat_id IS NULL';
         } else {
           const chatName = individualChat.replace(`${job}_`, '');
           params.push(chatName);
@@ -255,7 +255,7 @@ class ChatManager {
       
       if (individualChat !== undefined) {
         if (individualChat === null) {
-          query += ` AND individual_chat_id IS NULL`;
+          query += ' AND individual_chat_id IS NULL';
         } else {
           const chatName = individualChat.replace(`${job}_`, '');
           params.push(chatName);
@@ -333,7 +333,7 @@ class ChatManager {
       await client.query('BEGIN');
       
       // Get or create job
-      let jobResult = await client.query(
+      const jobResult = await client.query(
         'SELECT id FROM jobs WHERE name = $1',
         [data.job]
       );
@@ -431,7 +431,7 @@ class ChatManager {
       await client.query('BEGIN');
       
       // Get or create job
-      let jobResult = await client.query(
+      const jobResult = await client.query(
         'SELECT id FROM jobs WHERE name = $1',
         [data.job]
       );
@@ -448,7 +448,7 @@ class ChatManager {
       }
       
       // Get or create subcategory
-      let subcatResult = await client.query(
+      const subcatResult = await client.query(
         'SELECT id FROM subcategories WHERE job_id = $1 AND name = $2',
         [jobId, data.subcategory]
       );
